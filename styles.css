@@ -1,0 +1,1036 @@
+.colify-widget,
+.colify-widget * {
+	box-sizing: border-box;
+}
+
+.colify-widget {
+	--colify-accent: var(--interactive-accent, #5b6fc9);
+	--colify-accent-soft: color-mix(
+		in srgb,
+		var(--colify-accent) 10%,
+		transparent
+	);
+	--colify-accent-line: color-mix(
+		in srgb,
+		var(--colify-accent) 34%,
+		transparent
+	);
+	--colify-border: var(--background-modifier-border);
+	--colify-column-min-width: 180px;
+	--colify-column-adaptive-max-width: 320px;
+	--colify-radius: var(--radius-m, 8px);
+	--colify-radius-small: var(--radius-s, 4px);
+	--colify-surface: var(--background-primary);
+	--colify-soft: var(--background-secondary);
+	--colify-text: var(--text-normal);
+	--colify-muted: color-mix(in srgb, var(--colify-text) 58%, transparent);
+	--colify-shadow: var(--shadow-s, 0 2px 8px rgba(0, 0, 0, 0.08));
+	--colify-note-font-size: var(--font-text-size, 16px);
+	--colify-note-line-height: var(--line-height-normal, 1.6);
+	--colify-h1-size: var(--h1-size, 1.72em);
+	--colify-h1-weight: var(--h1-weight, var(--font-bold, 700));
+	--colify-h1-line-height: var(--h1-line-height, 1.2);
+	--colify-h1-color: var(--h1-color, var(--text-normal));
+	--colify-h1-font: var(--h1-font, var(--font-text));
+	--colify-h1-style: var(--h1-style, normal);
+	--colify-h1-letter-spacing: var(--h1-letter-spacing, 0);
+	--colify-h2-size: var(--h2-size, 1.42em);
+	--colify-h2-weight: var(--h2-weight, var(--font-bold, 700));
+	--colify-h2-line-height: var(--h2-line-height, 1.25);
+	--colify-h2-color: var(--h2-color, var(--text-normal));
+	--colify-h2-font: var(--h2-font, var(--font-text));
+	--colify-h2-style: var(--h2-style, normal);
+	--colify-h2-letter-spacing: var(--h2-letter-spacing, 0);
+	--colify-h3-size: var(--h3-size, 1.18em);
+	--colify-h3-weight: var(--h3-weight, var(--font-semibold, 600));
+	--colify-h3-line-height: var(--h3-line-height, 1.3);
+	--colify-h3-color: var(--h3-color, var(--text-normal));
+	--colify-h3-font: var(--h3-font, var(--font-text));
+	--colify-h3-style: var(--h3-style, normal);
+	--colify-h3-letter-spacing: var(--h3-letter-spacing, 0);
+	--colify-h1-source-inset: 0px;
+	--colify-h1-title-inset: calc(var(--colify-h1-source-inset) + 1.5ch);
+	--colify-h2-margin-top: 18px;
+	--colify-h2-padding-top: 12px;
+	--colify-h2-padding-right: 16px;
+	--colify-h2-padding-bottom: 10px;
+	--colify-h2-source-inset: 10px;
+	--colify-h2-title-inset: calc(var(--colify-h2-source-inset) + 2.5ch);
+	--colify-h3-source-inset: 0px;
+	--colify-h3-title-inset: calc(var(--colify-h3-source-inset) + 3.5ch);
+	--colify-section-body-inset: 18px;
+	--colify-section-body-padding-top: 14px;
+	--colify-section-body-padding-bottom: 14px;
+	--colify-section-surface: color-mix(
+		in srgb,
+		var(--background-secondary) 58%,
+		var(--background-primary)
+	);
+	--colify-section-border: color-mix(
+		in srgb,
+		var(--background-modifier-border) 78%,
+		transparent
+	);
+	--colify-table-border: var(--table-border-color, var(--colify-border));
+	--colify-table-header-background: var(
+		--table-header-background,
+		var(--colify-soft)
+	);
+	--colify-quote-color: var(--blockquote-color, var(--text-muted));
+	--colify-quote-border: var(
+		--blockquote-border-color,
+		var(--colify-accent-line)
+	);
+	--colify-quote-background: var(
+		--blockquote-background-color,
+		var(--colify-accent-soft)
+	);
+	position: relative;
+	display: block;
+	width: 100%;
+	margin: 0.9em 0;
+	padding: 14px 42px 12px 14px;
+	border: 1px solid var(--colify-border);
+	border-radius: var(--colify-radius);
+	background: var(--colify-surface);
+	box-shadow: var(--colify-shadow);
+	color: var(--colify-text);
+	overflow: visible;
+}
+
+.colify-widget--soft {
+	border-color: var(--colify-border);
+	background: var(--colify-soft);
+}
+
+.colify-widget--highlight {
+	border-color: var(--colify-accent-line);
+	background: color-mix(
+		in srgb,
+		var(--colify-accent) 9%,
+		var(--colify-surface)
+	);
+}
+
+.colify-reading-widget {
+	padding-right: 0;
+	padding-left: 0;
+}
+
+.colify-columns {
+	display: flex;
+	align-items: stretch;
+	width: 100%;
+	min-width: 0;
+	max-width: 100%;
+	gap: 0;
+	overflow-x: auto;
+	overflow-y: hidden;
+	overscroll-behavior-x: contain;
+}
+
+.colify-column {
+	--colify-column-height: 96px;
+	position: relative;
+	z-index: 1;
+	width: 0;
+	min-width: var(--colify-column-min-width);
+	max-width: 100%;
+	padding: 24px 16px 10px;
+	border-radius: calc(var(--colify-radius) - 4px);
+	outline: none;
+	overflow-wrap: anywhere;
+	cursor: text;
+	transition:
+		background-color 140ms ease,
+		box-shadow 140ms ease,
+		opacity 140ms ease;
+}
+
+.colify-column.is-colify-measuring {
+	--colify-column-height: 0px;
+}
+
+.colify-column:hover,
+.colify-column:focus-within {
+	z-index: 8;
+	background: color-mix(
+		in srgb,
+		var(--colify-accent) 4.5%,
+		transparent
+	);
+}
+
+.colify-column.is-file-drop-target {
+	z-index: 9;
+	background: color-mix(
+		in srgb,
+		var(--colify-accent) 9%,
+		transparent
+	);
+	box-shadow: inset 0 0 0 1px var(--colify-accent-line);
+}
+
+.colify-reading-column + .colify-reading-column {
+	border-left: 1px solid var(--colify-border);
+}
+
+.colify-reading-column,
+.colify-reading-column .colify-column-preview {
+	cursor: default;
+}
+
+.colify-column-preview {
+	width: 100%;
+	min-height: var(--colify-column-height);
+	min-width: 0;
+	max-width: 100%;
+	padding: 2px 0;
+	cursor: text;
+	overflow: visible;
+}
+
+.colify-column-preview.colify-markdown-surface {
+	width: 100%;
+	max-width: 100%;
+	margin: 0;
+	padding: 2px 0 !important;
+	background: transparent;
+}
+
+.colify-column-preview[hidden] {
+	display: none !important;
+}
+
+.colify-column-preview img,
+.colify-column-preview video,
+.colify-column-preview canvas,
+.colify-column-preview svg {
+	max-width: 100%;
+	height: auto;
+	-webkit-user-drag: none;
+}
+
+.colify-column-preview .internal-embed,
+.colify-column-preview .media-embed,
+.colify-column-preview .image-embed,
+.colify-column-preview .markdown-embed {
+	max-width: 100%;
+	-webkit-user-drag: none;
+}
+
+.colify-widget .colify-table-wrapper,
+.colify-widget .colify-column-preview .table-wrapper {
+	display: block !important;
+	width: 100% !important;
+	min-width: 0 !important;
+	max-width: 100% !important;
+	overflow-x: auto !important;
+	overflow-y: hidden;
+}
+
+.colify-widget table.colify-table,
+.colify-widget .colify-column-preview table {
+	display: table !important;
+	width: 100% !important;
+	min-width: 0 !important;
+	max-width: 100% !important;
+	table-layout: fixed !important;
+}
+
+.colify-widget table.colify-table.colify-table-measurement {
+	position: absolute !important;
+	visibility: hidden !important;
+	pointer-events: none !important;
+	width: max-content !important;
+	min-width: 0 !important;
+	max-width: none !important;
+	table-layout: auto !important;
+}
+
+.colify-widget table.colify-table th,
+.colify-widget table.colify-table td,
+.colify-widget .colify-column-preview th,
+.colify-widget .colify-column-preview td {
+	width: auto !important;
+	min-width: 0 !important;
+	max-width: none !important;
+	overflow-wrap: anywhere;
+	word-break: break-word;
+	white-space: normal;
+}
+
+.colify-widget table.colify-table.colify-table-measurement :is(th, td) {
+	width: auto !important;
+	min-width: 0 !important;
+	max-width: none !important;
+	overflow-wrap: normal !important;
+	word-break: normal !important;
+	white-space: nowrap !important;
+}
+
+.colify-widget .colify-markdown-surface table {
+	color: var(--colify-text);
+	background: var(--colify-surface);
+	border: 1px solid var(--colify-table-border);
+	border-collapse: separate;
+	border-spacing: 0;
+	border-radius: var(--colify-radius);
+	box-shadow: none;
+	overflow: hidden;
+}
+
+.colify-widget .colify-markdown-surface :is(th, td) {
+	padding: 0.48em 0.62em;
+	color: var(--colify-text);
+	background: transparent;
+	border: 0;
+	border-right: 1px solid var(--colify-table-border);
+	border-bottom: 1px solid var(--colify-table-border);
+}
+
+.colify-widget .colify-markdown-surface th {
+	font-weight: var(--font-semibold, 600);
+	background: var(--colify-table-header-background);
+}
+
+.colify-widget .colify-markdown-surface tr > :last-child {
+	border-right: 0;
+}
+
+.colify-widget .colify-markdown-surface tbody tr:last-child > td {
+	border-bottom: 0;
+}
+
+.colify-table-cell {
+	position: relative;
+	cursor: text;
+}
+
+.colify-table-cell-editor {
+	display: block;
+	width: 100%;
+	min-width: 0;
+	margin: 0;
+	padding: 0;
+	border: 0 !important;
+	border-radius: 0;
+	box-shadow: none !important;
+	color: inherit;
+	background: transparent !important;
+	font: inherit;
+	font-weight: inherit;
+	line-height: inherit;
+	text-align: inherit;
+	letter-spacing: 0;
+	outline: none !important;
+}
+
+.colify-table-cell.is-colify-table-cell-editing {
+	box-shadow: inset 0 0 0 2px var(--interactive-accent);
+}
+
+.colify-markdown-preview-section {
+	display: flex !important;
+	flex-direction: column;
+	align-items: stretch;
+	width: 100%;
+	min-width: 0;
+	min-height: 0;
+	max-width: 100%;
+	margin: 0;
+	padding: 0;
+	gap: 0 !important;
+}
+
+.colify-widget .colify-markdown-preview-section > * {
+	flex: 0 0 auto;
+	margin-block: 0 !important;
+}
+
+.colify-markdown-block {
+	display: flow-root;
+	width: 100%;
+	min-width: 0;
+	max-width: 100%;
+	margin: 0 !important;
+}
+
+.colify-widget .colify-markdown-surface,
+.colify-widget .colify-column-editor-host .cm-content {
+	color: var(--colify-text);
+	font-family: var(--font-text);
+	font-size: var(--colify-note-font-size);
+	line-height: var(--colify-note-line-height);
+	letter-spacing: 0;
+}
+
+.colify-widget .colify-markdown-preview-section > .colify-markdown-block {
+	margin: 0;
+	padding: 0;
+	background: transparent;
+	border: 0;
+	border-radius: 0;
+	box-shadow: none;
+}
+
+.colify-widget .colify-markdown-surface h1,
+.colify-widget .colify-column-editor-host .cm-line.HyperMD-header-1 {
+	position: relative;
+	margin: 1em 0 0.65em;
+	font-size: var(--colify-h1-size);
+	color: var(--colify-h1-color);
+	font-family: var(--colify-h1-font);
+	font-style: var(--colify-h1-style);
+	font-weight: var(--colify-h1-weight);
+	line-height: var(--colify-h1-line-height);
+	letter-spacing: var(--colify-h1-letter-spacing);
+	background: transparent;
+	border: 0;
+	box-shadow: none;
+}
+
+.colify-widget .colify-markdown-surface h1 {
+	padding: 0 0 0 var(--colify-h1-title-inset);
+}
+
+.colify-widget .colify-column-editor-host .cm-line.HyperMD-header-1 {
+	padding: 0 0 0 var(--colify-h1-source-inset);
+}
+
+.colify-widget .colify-markdown-surface h1::before {
+	content: "";
+	position: absolute;
+	top: 50%;
+	left: var(--colify-h1-source-inset);
+	display: block;
+	width: 0.66em;
+	height: 0.66em;
+	margin: 0;
+	transform: translateY(-50%) rotate(8deg);
+	border-radius: var(--colify-radius-small);
+	background: var(--colify-accent-soft);
+	box-shadow: inset 0 0 0 1px var(--colify-accent-line);
+}
+
+.colify-widget .colify-markdown-surface h1::after {
+	content: none;
+	display: none;
+}
+
+.colify-widget
+	.colify-markdown-preview-section
+	> .colify-markdown-block.colify-section-heading {
+	margin: var(--colify-h2-margin-top) 0 0 !important;
+}
+
+.colify-widget
+	.colify-markdown-preview-section
+	> :is(h2, :has(> h2)) {
+	margin-right: 0 !important;
+	margin-bottom: 0 !important;
+	margin-left: 0 !important;
+}
+
+.colify-widget .colify-markdown-surface h2,
+.colify-widget .colify-column-editor-host .cm-line.HyperMD-header-2 {
+	position: relative;
+	margin: 0 !important;
+	padding-top: var(--colify-h2-padding-top);
+	padding-right: var(--colify-h2-padding-right);
+	padding-bottom: var(--colify-h2-padding-bottom);
+	font-size: var(--colify-h2-size);
+	color: var(--colify-h2-color);
+	font-family: var(--colify-h2-font);
+	font-style: var(--colify-h2-style);
+	font-weight: var(--colify-h2-weight);
+	line-height: var(--colify-h2-line-height);
+	letter-spacing: var(--colify-h2-letter-spacing);
+	background: var(--colify-section-surface);
+	border: 1px solid var(--colify-section-border);
+	border-bottom: 0;
+	border-radius: var(--colify-radius) var(--colify-radius) 0 0;
+	box-shadow: none;
+}
+
+.colify-widget .colify-markdown-surface h2 {
+	padding-left: var(--colify-h2-title-inset);
+}
+
+.colify-widget .colify-column-editor-host .cm-line.HyperMD-header-2 {
+	margin-top: var(--colify-h2-margin-top);
+	padding-left: var(--colify-h2-source-inset);
+}
+
+.colify-widget .colify-markdown-surface h2::before {
+	content: "";
+	position: absolute;
+	top: 50%;
+	left: calc(var(--colify-h2-source-inset) + 0.25ch);
+	display: block;
+	width: 0.62em;
+	height: 0.62em;
+	margin: 0;
+	transform: translateY(-50%);
+	border-radius: 50%;
+	background: var(--colify-accent);
+	box-shadow: 0 0 0 4px var(--colify-accent-soft);
+}
+
+.colify-widget .colify-markdown-surface h2::after {
+	content: "";
+	position: absolute;
+	right: var(--colify-h2-padding-right);
+	bottom: 0;
+	left: var(--colify-h2-title-inset);
+	display: block;
+	height: 1px;
+	margin: 0;
+	background: var(--colify-accent-line);
+}
+
+.colify-widget
+	.colify-markdown-preview-section
+	> .colify-markdown-block.colify-section-body,
+.colify-widget
+	.colify-column-editor-host
+	.cm-line.HyperMD-header-2
+	~ .cm-line:not(.HyperMD-header-1):not(.HyperMD-header-2) {
+	margin: 0 !important;
+	padding-right: var(--colify-section-body-inset);
+	padding-left: var(--colify-section-body-inset);
+	background: var(--colify-section-surface);
+	border-right: 1px solid var(--colify-section-border);
+	border-left: 1px solid var(--colify-section-border);
+	border-radius: 0 !important;
+	box-shadow: none;
+}
+
+.colify-widget
+	.colify-markdown-preview-section
+	> :is(h2, :has(> h2))
+	~ :not(h1, h2, :has(> h1), :has(> h2), .mod-footer) {
+	margin: 0 !important;
+	padding-right: var(--colify-section-body-inset);
+	padding-left: var(--colify-section-body-inset);
+	background: var(--colify-section-surface) !important;
+	border-right: 1px solid var(--colify-section-border) !important;
+	border-left: 1px solid var(--colify-section-border) !important;
+	border-radius: 0 !important;
+	box-shadow: none !important;
+}
+
+.colify-widget
+	.colify-markdown-preview-section
+	> :is(h2, :has(> h2))
+	+ :not(h1, h2, :has(> h1), :has(> h2), .mod-footer) {
+	padding-top: var(--colify-section-body-padding-top);
+}
+
+.colify-widget
+	.colify-markdown-preview-section
+	> :is(h2, :has(> h2))
+	~ :not(h1, h2, :has(> h1), :has(> h2), .mod-footer):last-child {
+	padding-bottom: var(--colify-section-body-padding-bottom);
+	border-bottom: 1px solid var(--colify-section-border) !important;
+	border-radius: 0 0 var(--colify-radius) var(--colify-radius) !important;
+}
+
+.colify-widget
+	.colify-markdown-preview-section
+	> :is(p, :has(> p))
+	> p,
+.colify-widget
+	.colify-markdown-preview-section
+	> p {
+	margin: 0 !important;
+}
+
+.colify-widget
+	.colify-markdown-preview-section
+	> .colify-markdown-block.colify-section-body--first,
+.colify-widget
+	.colify-column-editor-host
+	.cm-line.HyperMD-header-2
+	+ .cm-line:not(.HyperMD-header-1):not(.HyperMD-header-2) {
+	padding-top: var(--colify-section-body-padding-top);
+}
+
+.colify-widget
+	.colify-markdown-preview-section
+	> .colify-markdown-block.colify-section-body--last,
+.colify-widget
+	.colify-column-editor-host
+	.cm-line.HyperMD-header-2
+	~ .cm-line:not(.HyperMD-header-1):not(.HyperMD-header-2):last-child {
+	padding-bottom: var(--colify-section-body-padding-bottom);
+	border-bottom: 1px solid var(--colify-section-border);
+	border-radius: 0 0 var(--colify-radius) var(--colify-radius);
+}
+
+.colify-widget
+	.colify-markdown-preview-section
+	> .colify-markdown-block.colify-section-heading--solo
+	> h2,
+.colify-widget
+	.colify-column-editor-host
+	.cm-line.HyperMD-header-2:last-child {
+	border-bottom: 1px solid var(--colify-section-border);
+	border-radius: var(--colify-radius);
+}
+
+.colify-widget .colify-markdown-surface h3,
+.colify-widget .colify-column-editor-host .cm-line.HyperMD-header-3 {
+	position: relative;
+	margin: 0.85em 0 0.4em;
+	font-size: var(--colify-h3-size);
+	color: var(--colify-h3-color);
+	font-family: var(--colify-h3-font);
+	font-style: var(--colify-h3-style);
+	font-weight: var(--colify-h3-weight);
+	line-height: var(--colify-h3-line-height);
+	letter-spacing: var(--colify-h3-letter-spacing);
+	background: transparent;
+	border: 0;
+}
+
+.colify-widget .colify-markdown-surface h3 {
+	padding: 0 0 0 var(--colify-h3-title-inset);
+}
+
+.colify-widget .colify-column-editor-host .cm-line.HyperMD-header-3 {
+	padding: 0 0 0 var(--colify-h3-source-inset);
+}
+
+.colify-widget .colify-markdown-surface h3::before {
+	content: "";
+	position: absolute;
+	top: 50%;
+	left: calc(var(--colify-h3-source-inset) + 1.25ch);
+	display: block;
+	width: 0.42em;
+	height: 0.42em;
+	margin: 0;
+	transform: translateY(-50%);
+	border-radius: 50%;
+	background: var(--colify-accent);
+	box-shadow: none;
+}
+
+.colify-widget .colify-markdown-surface h3::after {
+	content: none;
+	display: none;
+}
+
+.colify-widget
+	.colify-column-editor-host
+	.cm-line.HyperMD-header
+	:is(.cm-header, .cm-formatting-header) {
+	font-size: inherit;
+	font-weight: inherit;
+	line-height: inherit;
+	letter-spacing: 0;
+}
+
+.colify-widget
+	.colify-column-editor-host
+	.cm-line.HyperMD-header
+	.cm-formatting-header {
+	color: var(--colify-muted);
+}
+
+.colify-widget .colify-markdown-surface p {
+	margin: 0 0 0.65em;
+	padding: 0;
+	color: var(--colify-text);
+}
+
+.colify-widget
+	.colify-markdown-preview-section
+	> .colify-markdown-block.colify-section-body.el-p
+	> p {
+	margin: 0 !important;
+}
+
+.colify-widget .colify-markdown-surface :is(ul, ol) {
+	margin: 0.5em 0;
+	padding-left: 1.5em;
+}
+
+.colify-widget .colify-markdown-surface li {
+	margin: 0.2em 0;
+	padding: 0;
+}
+
+.colify-widget .colify-markdown-surface blockquote {
+	margin: 0.55em 0;
+	padding: 0.35em 0.8em;
+	color: var(--colify-quote-color);
+	background: var(--colify-quote-background);
+	border: 0;
+	border-left: var(--blockquote-border-thickness, 3px) solid
+		var(--colify-quote-border);
+	border-radius: 0 var(--colify-radius) var(--colify-radius) 0;
+	box-shadow: none;
+}
+
+.colify-widget .colify-markdown-surface pre {
+	max-width: 100%;
+	margin: 0.65em 0;
+	padding: 0.75em 0.9em;
+	background: var(--code-background);
+	border: 1px solid var(--colify-border);
+	border-radius: var(--colify-radius);
+	box-shadow: none;
+	overflow-x: auto;
+}
+
+.colify-widget .colify-markdown-surface a {
+	color: var(--link-color);
+	font-weight: var(--link-weight, var(--font-semibold, 600));
+	text-decoration: none;
+}
+
+.colify-widget .colify-markdown-surface a:hover {
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
+
+.colify-widget .colify-markdown-surface hr {
+	margin: 0.8em 0;
+	border: 0;
+	border-top: 1px solid var(--colify-border);
+}
+
+.colify-widget .colify-markdown-surface .callout {
+	margin: 0.65em 0;
+	border-radius: var(--colify-radius);
+	box-shadow: none;
+}
+
+.colify-image-frame {
+	position: relative;
+	display: block;
+	width: fit-content;
+	max-width: 100%;
+	margin-top: 0.35em;
+	margin-bottom: 0.35em;
+}
+
+.colify-image-frame[data-colify-image-width] {
+	width: var(--colify-image-width);
+}
+
+.colify-image-frame > img,
+.colify-image-frame img {
+	display: block;
+	max-width: 100%;
+	height: auto;
+}
+
+.colify-image-frame[data-colify-image-width] img,
+.colify-image-frame[data-colify-image-width] .internal-embed,
+.colify-image-frame[data-colify-image-width] .media-embed,
+.colify-image-frame[data-colify-image-width] .image-embed {
+	width: 100%;
+	max-width: 100%;
+}
+
+.colify-image-frame.colify-image-align-left {
+	margin-left: 0 !important;
+	margin-right: auto !important;
+}
+
+.colify-image-frame.colify-image-align-center {
+	margin-left: auto !important;
+	margin-right: auto !important;
+}
+
+.colify-image-frame.colify-image-align-right {
+	margin-left: auto !important;
+	margin-right: 0 !important;
+}
+
+.colify-image-resize-handle {
+	position: absolute;
+	right: -5px;
+	bottom: -5px;
+	z-index: 12;
+	width: 12px;
+	height: 12px;
+	border: 2px solid var(--background-primary);
+	border-radius: 999px;
+	background: var(--colify-accent);
+	box-shadow: var(--colify-shadow);
+	opacity: 0;
+	pointer-events: none;
+	cursor: nwse-resize;
+	transition:
+		opacity 120ms ease,
+		transform 120ms ease;
+}
+
+.colify-image-frame:hover > .colify-image-resize-handle,
+.colify-image-frame:focus-within > .colify-image-resize-handle,
+.colify-image-frame.is-resizing > .colify-image-resize-handle {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.colify-image-frame:hover > .colify-image-resize-handle,
+.colify-image-frame.is-resizing > .colify-image-resize-handle {
+	transform: scale(1.12);
+}
+
+.colify-reading-blank-line {
+	display: block;
+	height: calc(
+		var(--colify-extra-blank-lines, 1) * 1em *
+			var(--line-height-normal, 1.5)
+	);
+	margin: 0;
+	padding: 0;
+	pointer-events: none;
+}
+
+.colify-render-fragment-hidden {
+	display: none;
+}
+
+.colify-column-placeholder {
+	color: var(--colify-muted);
+	font-style: italic;
+}
+
+.colify-column-editor-host {
+	display: block;
+	width: 100%;
+	min-height: var(--colify-column-height);
+	margin: 0;
+	padding: 0;
+	border: 0 !important;
+	border-radius: calc(var(--colify-radius) - 6px);
+	box-shadow: none !important;
+	color: var(--colify-text) !important;
+	background: transparent !important;
+	overflow: visible;
+	outline: none !important;
+}
+
+.colify-column-editor-host.is-colify-measuring {
+	min-height: 0;
+	max-height: none;
+}
+
+.colify-column-editor-host[hidden] {
+	display: none !important;
+}
+
+.colify-column-editor-host .cm-editor {
+	height: auto;
+	min-height: var(--colify-column-height);
+	color: var(--colify-text);
+	background: transparent;
+	font: inherit;
+}
+
+.colify-column-editor-host .cm-scroller {
+	font-family: inherit;
+	line-height: var(--colify-note-line-height);
+	padding: 0 !important;
+	overflow: hidden !important;
+}
+
+.colify-column-editor-host .cm-contentContainer,
+.colify-column-editor-host .cm-content {
+	width: 100% !important;
+	max-width: 100% !important;
+	margin: 0 !important;
+}
+
+.colify-column-editor-host .cm-content {
+	min-height: var(--colify-column-height);
+	padding: 2px 0;
+	caret-color: var(--colify-text);
+}
+
+.colify-column-editor-host .cm-line {
+	padding: 0;
+}
+
+.colify-column-editor-host .cm-focused {
+	outline: none !important;
+}
+
+.colify-column-editor-host .cm-editor.cm-focused,
+.colify-column-editor-host .cm-editor:focus-within {
+	background: transparent !important;
+	box-shadow: none !important;
+	outline: none !important;
+}
+
+.colify-column-editor-host .cm-placeholder {
+	color: var(--colify-muted);
+	font-style: italic;
+}
+
+.colify-resizer {
+	flex: 0 0 12px;
+	position: relative;
+	cursor: col-resize;
+	user-select: none;
+	touch-action: none;
+}
+
+.colify-resizer::before {
+	content: "";
+	position: absolute;
+	top: 6px;
+	bottom: 6px;
+	left: 5px;
+	width: 1px;
+	border-radius: 999px;
+	background: var(--colify-border);
+	opacity: 0.8;
+	transition:
+		opacity 120ms ease,
+		background-color 120ms ease;
+}
+
+.colify-resizer:hover::before {
+	background: var(--colify-accent);
+	opacity: 1;
+}
+
+.colify-resizer.is-resizing::before {
+	width: 2px;
+	background: var(--colify-accent);
+	opacity: 1;
+}
+
+body.is-colify-resizing,
+body.is-colify-resizing * {
+	cursor: col-resize !important;
+	user-select: none !important;
+}
+
+.colify-column-add-button {
+	position: absolute;
+	top: 14px;
+	right: 7px;
+	bottom: 12px;
+	z-index: 6;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: auto;
+	padding: 0;
+	border: 1px solid var(--colify-border);
+	border-radius: var(--colify-radius-small);
+	color: var(--text-muted);
+	background: color-mix(in srgb, var(--background-primary) 82%, transparent);
+	box-shadow: none;
+	font-family: var(--font-interface);
+	font-size: 22px;
+	font-weight: var(--font-normal, 400);
+	line-height: 1;
+	letter-spacing: 0;
+	opacity: 0;
+	pointer-events: none;
+	cursor: pointer;
+	transition:
+		opacity 120ms ease,
+		color 120ms ease,
+		border-color 120ms ease,
+		background-color 120ms ease;
+}
+
+.colify-widget:hover .colify-column-add-button,
+.colify-widget:focus-within .colify-column-add-button,
+.colify-column-add-button:hover,
+.colify-column-add-button:focus-visible {
+	opacity: 1;
+	pointer-events: auto;
+}
+
+.colify-column-add-button:hover,
+.colify-column-add-button:focus-visible {
+	color: var(--colify-accent);
+	border-color: var(--colify-accent-line);
+	background: var(--colify-accent-soft);
+	outline: none;
+}
+
+.colify-column-drag-handle {
+	position: absolute;
+	top: 4px;
+	left: 50%;
+	z-index: 5;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 36px;
+	height: 18px;
+	padding: 0;
+	border: 1px solid transparent;
+	border-radius: 999px;
+	color: var(--colify-muted);
+	background: transparent;
+	font-family: var(--font-interface);
+	font-size: 16px;
+	font-weight: var(--font-semibold, 600);
+	line-height: 1;
+	letter-spacing: 0;
+	opacity: 0;
+	cursor: grab;
+	transform: translateX(-50%);
+	transition:
+		opacity 120ms ease,
+		color 120ms ease,
+		border-color 120ms ease,
+		background-color 120ms ease;
+}
+
+.colify-column:hover > .colify-column-drag-handle,
+.colify-column:focus-within > .colify-column-drag-handle,
+.colify-column-drag-handle:focus-visible,
+.colify-column-drag-handle.is-dragging {
+	opacity: 1;
+}
+
+.colify-column-drag-handle:hover,
+.colify-column-drag-handle:focus-visible,
+.colify-column-drag-handle.is-dragging {
+	color: var(--colify-accent);
+	border-color: var(--colify-accent-line);
+	background: var(--colify-accent-soft);
+	outline: none;
+}
+
+.colify-column-drag-handle:active,
+.colify-column-drag-handle.is-dragging {
+	cursor: grabbing;
+}
+
+.colify-column.is-drop-before::before,
+.colify-column.is-drop-after::after {
+	content: "";
+	position: absolute;
+	top: 8px;
+	bottom: 8px;
+	z-index: 7;
+	width: 2px;
+	border-radius: 999px;
+	background: var(--colify-accent);
+	box-shadow: 0 0 0 3px var(--colify-accent-soft);
+	pointer-events: none;
+}
+
+.colify-column.is-drop-before::before {
+	left: 2px;
+}
+
+.colify-column.is-drop-after::after {
+	right: 2px;
+}
