@@ -1,6 +1,6 @@
 {
 	"name": "colify",
-	"version": "0.1.5",
+	"version": "0.1.0",
 	"description": "A visual column layout editor for Live Preview.",
 	"main": "main.js",
 	"scripts": {

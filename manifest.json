@@ -1,7 +1,7 @@
 {
 	"id": "colify",
 	"name": "Colify",
-	"version": "0.1.5",
+	"version": "0.1.0",
 	"minAppVersion": "1.5.0",
 	"description": "A visual column layout editor for Live Preview.",
 	"author": "Qismet",
