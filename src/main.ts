@@ -1,4 +1,11 @@
-import { Editor, Menu, Plugin } from "obsidian";
+import {
+	App,
+	Editor,
+	Menu,
+	Plugin,
+	PluginSettingTab,
+	Setting
+} from "obsidian";
 
 import {
 	createDefaultColifyBlock,
@@ -12,8 +19,23 @@ const INSERT_COLUMNS_ICON = "columns-3";
 const REPLACE_SELECTION_ORIGIN = "colify-insert-columns";
 const DEFAULT_COLUMNS_MARKDOWN = serializeColifyBlock(createDefaultColifyBlock());
 
+interface ColifySettings {
+	renderReadingViewColumns: boolean;
+}
+
+const DEFAULT_SETTINGS: ColifySettings = {
+	renderReadingViewColumns: false
+};
+
 export default class ColifyPlugin extends Plugin {
-	onload(): void {
+	settings: ColifySettings = DEFAULT_SETTINGS;
+
+	async onload(): Promise<void> {
+		this.settings = {
+			...DEFAULT_SETTINGS,
+			...(await this.loadData())
+		};
+
 		this.addStatusBarItem().setText("Colify");
 		this.registerEditorMenu();
 		this.registerInsertCommand();
@@ -23,6 +45,17 @@ export default class ColifyPlugin extends Plugin {
 				getSourcePath: () => this.app.workspace.getActiveFile()?.path ?? ""
 			})
 		);
+		if (this.settings.renderReadingViewColumns) {
+			this.registerReadingViewRenderer();
+		}
+		this.addSettingTab(new ColifySettingTab(this.app, this));
+	}
+
+	async saveSettings(): Promise<void> {
+		await this.saveData(this.settings);
+	}
+
+	private registerReadingViewRenderer(): void {
 		this.registerMarkdownPostProcessor(
 			createColifyReadingPostProcessor({
 				app: this.app
@@ -77,5 +110,33 @@ export default class ColifyPlugin extends Plugin {
 			DEFAULT_COLUMNS_MARKDOWN,
 			needsTrailingBreak ? "\n\n" : "\n"
 		].join("");
+	}
+}
+
+class ColifySettingTab extends PluginSettingTab {
+	constructor(
+		app: App,
+		private readonly plugin: ColifyPlugin
+	) {
+		super(app, plugin);
+	}
+
+	display(): void {
+		const { containerEl } = this;
+		containerEl.empty();
+
+		new Setting(containerEl)
+			.setName("Render columns in Reading View")
+			.setDesc(
+				"Disabled by default to avoid scroll jumps when switching between Live Preview and Reading View."
+			)
+			.addToggle((toggle) => {
+				toggle
+					.setValue(this.plugin.settings.renderReadingViewColumns)
+					.onChange(async (value) => {
+						this.plugin.settings.renderReadingViewColumns = value;
+						await this.plugin.saveSettings();
+					});
+			});
 	}
 }
