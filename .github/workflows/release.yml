@@ -17,7 +17,8 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Validate release tag
-        run: node -e "const manifest = require('./manifest.json'); if (process.env.GITHUB_REF_NAME !== manifest.version) { console.error('Tag must equal manifest version: ' + manifest.version); process.exit(1); }"
+        run: |
+          node -e "const manifest = require('./manifest.json'); if (process.env.GITHUB_REF_NAME !== manifest.version) { console.error('Tag must equal manifest version: ' + manifest.version); process.exit(1); }"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
