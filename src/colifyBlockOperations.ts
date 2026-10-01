@@ -42,6 +42,12 @@ export function removeColifyColumn(
 	);
 }
 
+export type ColumnDeleteAction = "remove-column" | "delete-block";
+
+export function getColumnDeleteAction(columnCount: number): ColumnDeleteAction {
+	return columnCount > 1 ? "remove-column" : "delete-block";
+}
+
 export function moveColifyColumn(
 	block: ColifyBlock,
 	fromColumnIndex: number,

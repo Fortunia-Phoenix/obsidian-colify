@@ -6,6 +6,21 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+export function isDomInstance<T extends Node>(
+	target: EventTarget | null,
+	type: { new (): T }
+): target is T {
+	if (target === null || typeof target !== "object") {
+		return false;
+	}
+
+	const candidate = target as Node;
+	return (
+		typeof candidate.instanceOf === "function" &&
+		candidate.instanceOf(type)
+	);
+}
+
 export function normalizeLineEndings(value: string): string {
 	return value.replace(/\r\n?/g, "\n");
 }

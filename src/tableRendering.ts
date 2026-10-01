@@ -1,4 +1,6 @@
 import {
+	appendMarkdownTableColumn,
+	appendMarkdownTableRow,
 	getMarkdownTableCellValue,
 	setMarkdownTableCellValue
 } from "./markdownTable";
@@ -9,11 +11,16 @@ import {
 	getElementHorizontalPadding,
 	setColumnMinimumWidth
 } from "./columnLayout";
+import { isDomInstance } from "./coreUtils";
 
 interface ColifyTableRenderingOptions {
-	onChange?: (markdown: string) => void;
+	onChange?: (change: MarkdownTableChange) => void;
 	onLayout?: () => void;
 }
+
+export type MarkdownTableChange =
+	| string
+	| ((currentMarkdown: string) => string);
 
 interface AdaptiveMeasurementTask {
 	container: HTMLElement;
@@ -62,10 +69,22 @@ export function applyColifyTableRendering(
 	const tables = Array.from(container.querySelectorAll<HTMLTableElement>("table"));
 
 	tables.forEach((table, tableIndex) => {
-		prepareTableLayout(table, tableIndex);
+		const shell = prepareTableLayout(
+			table,
+			tableIndex,
+			Boolean(options.onChange)
+		);
 
 		if (options.onChange) {
 			bindEditableCells(table, tableIndex, markdown, options.onChange);
+			if (shell) {
+				addTableAppendControls(
+					shell,
+					tableIndex,
+					markdown,
+					options.onChange
+				);
+			}
 		}
 	});
 
@@ -76,12 +95,16 @@ export function applyColifyTableRendering(
 	);
 }
 
-function prepareTableLayout(table: HTMLTableElement, tableIndex: number): void {
+function prepareTableLayout(
+	table: HTMLTableElement,
+	tableIndex: number,
+	isEditable: boolean
+): HTMLElement | null {
 	table.classList.add("colify-table");
 	table.dataset.colifyTableIndex = String(tableIndex);
 
-	const wrapper = table.closest<HTMLElement>(".table-wrapper");
-	wrapper?.classList.add("colify-table-wrapper");
+	const wrapper = ensureTableScrollWrapper(table);
+	const shell = wrapper && isEditable ? ensureTableShell(wrapper) : null;
 
 	const headerRow = table.tHead?.rows[0];
 	if (headerRow) {
@@ -94,6 +117,86 @@ function prepareTableLayout(table: HTMLTableElement, tableIndex: number): void {
 	bodyRows.forEach((row, rowIndex) => {
 		labelRowCells(row, String(rowIndex));
 	});
+	return shell;
+}
+
+function ensureTableScrollWrapper(table: HTMLTableElement): HTMLElement | null {
+	const existingWrapper = table.closest<HTMLElement>(".table-wrapper");
+	if (existingWrapper) {
+		existingWrapper.classList.add("colify-table-wrapper");
+		return existingWrapper;
+	}
+
+	const parent = table.parentNode;
+	if (!parent) {
+		return null;
+	}
+
+	const wrapper = table.ownerDocument.createElement("div");
+	wrapper.className = "table-wrapper colify-table-wrapper";
+	parent.insertBefore(wrapper, table);
+	wrapper.appendChild(table);
+	return wrapper;
+}
+
+function ensureTableShell(wrapper: HTMLElement): HTMLElement {
+	const existingShell = wrapper.parentElement?.closest<HTMLElement>(
+		".colify-table-shell"
+	);
+	if (existingShell?.contains(wrapper)) {
+		return existingShell;
+	}
+
+	const shell = wrapper.ownerDocument.createElement("div");
+	shell.className = "colify-table-shell";
+	wrapper.parentNode?.insertBefore(shell, wrapper);
+	shell.appendChild(wrapper);
+	return shell;
+}
+
+function addTableAppendControls(
+	shell: HTMLElement,
+	tableIndex: number,
+	_markdown: string,
+	onChange: (change: MarkdownTableChange) => void
+): void {
+	const controls = shell.ownerDocument.createElement("div");
+	controls.className = "colify-table-controls";
+	controls.setAttribute("aria-label", "表格行列控制");
+	shell.appendChild(controls);
+	appendTableButton(controls, "row", "在表格末尾新增一行", () => {
+		onChange((currentMarkdown) =>
+			appendMarkdownTableRow(currentMarkdown, tableIndex)
+		);
+	});
+	appendTableButton(controls, "column", "在表格末尾新增一列", () => {
+		onChange((currentMarkdown) =>
+			appendMarkdownTableColumn(currentMarkdown, tableIndex)
+		);
+	});
+}
+
+function appendTableButton(
+	shell: HTMLElement,
+	kind: "row" | "column",
+	label: string,
+	onClick: () => void
+): void {
+	const button = shell.ownerDocument.createElement("button");
+	button.className = `colify-table-add-${kind}-button colify-icon-plus`;
+	button.type = "button";
+	button.setAttribute("aria-label", label);
+	button.title = label;
+	button.addEventListener("mousedown", (event) => {
+		event.preventDefault();
+		event.stopPropagation();
+	});
+	button.addEventListener("click", (event) => {
+		event.preventDefault();
+		event.stopPropagation();
+		onClick();
+	});
+	shell.appendChild(button);
 }
 
 function scheduleAdaptiveColumnMinimumWidth(
@@ -235,7 +338,7 @@ function findTableCell(
 	table: HTMLTableElement,
 	target: EventTarget | null
 ): HTMLTableCellElement | null {
-	if (!(target instanceof Element)) {
+	if (!isDomInstance(target, Element)) {
 		return null;
 	}
 
@@ -269,8 +372,7 @@ function openCellEditor(
 		return;
 	}
 
-	const preservedContent = cell.ownerDocument.createDocumentFragment();
-	preservedContent.append(...Array.from(cell.childNodes));
+	const preservedContent = Array.from(cell.childNodes);
 
 	const input = cell.ownerDocument.createElement("input");
 	input.className = "colify-table-cell-editor";
@@ -290,7 +392,7 @@ function openCellEditor(
 		}
 		finished = true;
 		cell.classList.remove("is-colify-table-cell-editing");
-		cell.replaceChildren(preservedContent);
+		cell.replaceChildren(...preservedContent);
 	};
 	const commit = (): void => {
 		if (finished) {
@@ -347,7 +449,7 @@ function getCellRowIndex(
 
 function isInteractiveCellContent(target: EventTarget | null): boolean {
 	return (
-		target instanceof Element &&
+		isDomInstance(target, Element) &&
 		Boolean(target.closest(CELL_CONTENT_INTERACTIVE_SELECTOR))
 	);
 }

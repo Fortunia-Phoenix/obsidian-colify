@@ -174,6 +174,53 @@ export function setMarkdownTableCellValue(
 	)}`;
 }
 
+export function appendMarkdownTableRow(
+	markdown: string,
+	tableIndex: number
+): string {
+	const table = getMarkdownTableByIndex(markdown, tableIndex);
+	if (!table) {
+		return markdown;
+	}
+
+	const rowIndex = table.rows.length > 0 ? table.rows.length - 1 : null;
+	const offset = getMarkdownTableCellOffset(markdown, tableIndex, rowIndex, 0);
+	return applyTableEdit(markdown, offset, "insert-row-after");
+}
+
+export function appendMarkdownTableColumn(
+	markdown: string,
+	tableIndex: number
+): string {
+	const table = getMarkdownTableByIndex(markdown, tableIndex);
+	if (!table) {
+		return markdown;
+	}
+
+	const offset = getMarkdownTableCellOffset(
+		markdown,
+		tableIndex,
+		null,
+		table.columnCount - 1
+	);
+	return applyTableEdit(markdown, offset, "insert-column-after");
+}
+
+function applyTableEdit(
+	markdown: string,
+	offset: number | null,
+	command: MarkdownTableCommand
+): string {
+	if (offset === null) {
+		return markdown;
+	}
+
+	const edit = applyMarkdownTableCommand(markdown, offset, command);
+	return edit
+		? `${markdown.slice(0, edit.from)}${edit.replacement}${markdown.slice(edit.to)}`
+		: markdown;
+}
+
 export function applyMarkdownTableCommand(
 	markdown: string,
 	offset: number,

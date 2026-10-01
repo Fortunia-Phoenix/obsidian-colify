@@ -9,7 +9,37 @@ const HEADING_PATTERN = /^(#{1,6})(?:\s+|$)/;
 const QUOTE_PATTERN = /^(\s*>+)(?:\s+|$)/;
 const LIST_PATTERN = /^(\s*)(?:[-+*]|\d+[.)])(?:\s+|$)/;
 const FENCE_PATTERN = /^\s*(?:`{3,}|~{3,})/;
+const FENCE_DELIMITER_PATTERN = /^\s*(`{3,}|~{3,})/;
+const FENCE_CLOSING_PATTERN = /^\s*(`{3,}|~{3,})\s*$/;
 const HORIZONTAL_RULE_PATTERN = /^\s*(?:(?:\*\s*){3,}|(?:-\s*){3,}|(?:_\s*){3,})$/;
+
+interface MarkdownFence {
+	character: "`" | "~";
+	length: number;
+}
+
+export function classifyMarkdownSourceLines(
+	lines: readonly string[]
+): Array<MarkdownSourceLineStyle | null> {
+	let openFence: MarkdownFence | null = null;
+
+	return lines.map((line) => {
+		if (openFence) {
+			const style = createCodeBlockLineStyle(line, isFenceClosing(line, openFence));
+			if (isFenceClosing(line, openFence)) {
+				openFence = null;
+			}
+			return style;
+		}
+
+		const style = classifyMarkdownSourceLine(line);
+		const fence = getFenceDelimiter(line);
+		if (fence) {
+			openFence = fence;
+		}
+		return style;
+	});
+}
 
 export function classifyMarkdownSourceLine(
 	line: string
@@ -63,4 +93,38 @@ export function classifyMarkdownSourceLine(
 	}
 
 	return null;
+}
+
+function createCodeBlockLineStyle(
+	line: string,
+	isClosingFence: boolean
+): MarkdownSourceLineStyle {
+	return {
+		lineClass: "HyperMD-codeblock",
+		markerClass: isClosingFence
+			? "cm-formatting cm-formatting-code-block"
+			: "",
+		markerLength: isClosingFence ? line.length : 0
+	};
+}
+
+function getFenceDelimiter(line: string): MarkdownFence | null {
+	const match = FENCE_DELIMITER_PATTERN.exec(line);
+	if (!match) {
+		return null;
+	}
+
+	return {
+		character: match[1][0] as "`" | "~",
+		length: match[1].length
+	};
+}
+
+function isFenceClosing(line: string, fence: MarkdownFence): boolean {
+	const match = FENCE_CLOSING_PATTERN.exec(line);
+	return Boolean(
+		match &&
+			match[1][0] === fence.character &&
+			match[1].length >= fence.length
+	);
 }

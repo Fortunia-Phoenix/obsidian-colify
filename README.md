@@ -35,6 +35,8 @@ Colify is designed for notes that need side-by-side structure without leaving Ma
 - Right-click images to set left, center, or right alignment.
 - Render the same layout in Reading view.
 
+For the complete implementation inventory, keyboard shortcuts, persistence behavior, compatibility boundaries, and maintenance notes, see [Colify 功能清单](../Index/功能清单.md).
+
 ## Usage
 
 In a Markdown note, right-click in the editor and choose `Insert columns`.
@@ -91,7 +93,15 @@ npm install
 npm run build
 ```
 
-The production build outputs `main.js`.
+This repository is the canonical source. The installed `.obsidian/plugins/colify/` directory contains runtime files and local plugin state only.
+
+```bash
+npm run deploy:local -- --target="/path/to/your-vault/.obsidian/plugins/colify"
+```
+
+The deployment target must be an external folder named `colify`. You can pass it with `--target` or set the `COLIFY_PLUGIN_DIR` environment variable. `deploy:local` runs the production build, copies only `main.js`, `manifest.json`, and `styles.css`, verifies each deployed SHA-256 hash, and preserves `data.json`.
+
+The production build outputs `main.js`; do not edit the deployed bundle directly.
 
 ## Release Files
 

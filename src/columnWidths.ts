@@ -8,7 +8,7 @@ export function normalizeColumnWidths(
 	columnCount: number
 ): number[] {
 	const safeColumnCount = Math.max(1, Math.trunc(columnCount));
-	const sourceWidths = Array.isArray(widths) ? widths : [];
+	const sourceWidths: unknown[] = Array.isArray(widths) ? widths : [];
 
 	return Array.from({ length: safeColumnCount }, (_, index) => {
 		const width = sourceWidths[index];

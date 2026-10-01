@@ -1,4 +1,5 @@
 import { normalizeLineEndings } from "./coreUtils";
+import { isColifyImageCommentLine } from "./imageControls";
 import { ensureTableBlockBoundaries } from "./markdownInsertion";
 import { findProtectedMarkdownLines } from "./markdownProtectedLines";
 
@@ -13,7 +14,7 @@ const BLOCK_SEPARATOR_PATTERN = /^ {0,3}(?:[-*_]\s*){3,}$/;
 
 export function prepareMarkdownRenderSource(content: string): string {
 	const markdown = ensureTableBlockBoundaries(normalizeLineEndings(content));
-	const lines = markdown.split("\n");
+	const lines = ensureImageCommentBlockBoundaries(markdown.split("\n"));
 	const protectedLines = findProtectedMarkdownLines(lines);
 	const output: string[] = [];
 
@@ -53,6 +54,24 @@ export function prepareMarkdownRenderSource(content: string): string {
 	}
 
 	return output.join("\n");
+}
+
+function ensureImageCommentBlockBoundaries(lines: string[]): string[] {
+	const output: string[] = [];
+
+	for (const line of lines) {
+		if (
+			isColifyImageCommentLine(line) &&
+			output.length > 0 &&
+			output[output.length - 1].trim().length > 0
+		) {
+			output.push("");
+		}
+
+		output.push(line);
+	}
+
+	return output;
 }
 
 function createExtraBlankLineMarker(count: number): string {

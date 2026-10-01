@@ -24,7 +24,8 @@
 	--colify-soft: var(--background-secondary);
 	--colify-text: var(--text-normal);
 	--colify-muted: color-mix(in srgb, var(--colify-text) 58%, transparent);
-	--colify-shadow: var(--shadow-s, 0 2px 8px rgba(0, 0, 0, 0.08));
+	--colify-shadow: 0 2px 7px rgba(0, 0, 0, 0.1);
+	--colify-control-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 	--colify-note-font-size: var(--font-text-size, 16px);
 	--colify-note-line-height: var(--line-height-normal, 1.6);
 	--colify-h1-size: var(--h1-size, 1.72em);
@@ -96,6 +97,7 @@
 	box-shadow: var(--colify-shadow);
 	color: var(--colify-text);
 	overflow: visible;
+	overflow-anchor: none;
 }
 
 .colify-widget--soft {
@@ -119,6 +121,7 @@
 
 .colify-columns {
 	display: flex;
+	flex-flow: row nowrap;
 	align-items: stretch;
 	width: 100%;
 	min-width: 0;
@@ -127,6 +130,21 @@
 	overflow-x: auto;
 	overflow-y: hidden;
 	overscroll-behavior-x: contain;
+}
+
+.markdown-preview-view .colify-widget .colify-columns {
+	display: flex;
+	flex-flow: row nowrap;
+	align-items: stretch;
+}
+
+.markdown-preview-view
+	.colify-widget
+	.colify-columns
+	> .colify-reading-column {
+	width: 0;
+	min-width: var(--colify-column-min-width);
+	max-width: 100%;
 }
 
 .colify-column {
@@ -211,6 +229,13 @@
 	-webkit-user-drag: none;
 }
 
+.colify-column-preview-staging {
+	position: absolute !important;
+	inset: 0 !important;
+	visibility: hidden !important;
+	pointer-events: none !important;
+}
+
 .colify-column-preview .internal-embed,
 .colify-column-preview .media-embed,
 .colify-column-preview .image-embed,
@@ -225,8 +250,84 @@
 	width: 100% !important;
 	min-width: 0 !important;
 	max-width: 100% !important;
+	border: 1px solid var(--colify-table-border);
+	border-radius: var(--colify-radius);
+	background: var(--colify-surface);
 	overflow-x: auto !important;
 	overflow-y: hidden;
+}
+
+.colify-table-shell {
+	position: relative;
+	width: 100%;
+	min-width: 0;
+	margin: 0 0 18px;
+	padding: 0 18px 14px 0;
+}
+
+.colify-table-controls {
+	position: absolute;
+	z-index: 7;
+	inset: 0;
+	overflow: visible;
+	opacity: 0;
+	visibility: hidden;
+	pointer-events: none;
+	transition:
+		opacity 120ms ease,
+		visibility 0s linear 120ms;
+}
+
+.colify-table-shell:hover .colify-table-controls,
+.colify-table-shell:focus-within .colify-table-controls {
+	opacity: 1;
+	visibility: visible;
+	transition-delay: 0s;
+}
+
+.colify-table-add-row-button,
+.colify-table-add-column-button {
+	position: absolute;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 22px;
+	height: 22px;
+	padding: 0;
+	border: 1px solid var(--colify-table-border);
+	border-radius: 999px;
+	color: var(--text-muted);
+	background: var(--background-primary);
+	box-shadow: var(--colify-control-shadow);
+	font: inherit;
+	line-height: 1;
+	cursor: pointer;
+	pointer-events: auto;
+}
+
+.colify-table-add-row-button {
+	left: calc(50% - 9px);
+	bottom: 0;
+}
+
+.colify-table-add-column-button {
+	top: calc(50% - 11px);
+	right: 0;
+}
+
+.colify-table-add-row-button:hover,
+.colify-table-add-column-button:hover,
+.colify-table-add-row-button:focus-visible,
+.colify-table-add-column-button:focus-visible {
+	color: var(--text-on-accent);
+	border-color: var(--interactive-accent);
+	background: var(--interactive-accent);
+}
+
+.colify-table-add-row-button:focus-visible,
+.colify-table-add-column-button:focus-visible {
+	outline: 2px solid var(--background-primary);
+	outline-offset: 2px;
 }
 
 .colify-widget table.colify-table,
@@ -271,13 +372,12 @@
 
 .colify-widget .colify-markdown-surface table {
 	color: var(--colify-text);
-	background: var(--colify-surface);
-	border: 1px solid var(--colify-table-border);
+	background: transparent;
+	border: 0;
 	border-collapse: separate;
 	border-spacing: 0;
-	border-radius: var(--colify-radius);
+	border-radius: 0;
 	box-shadow: none;
-	overflow: hidden;
 }
 
 .colify-widget .colify-markdown-surface :is(th, td) {
@@ -424,14 +524,6 @@
 	margin: var(--colify-h2-margin-top) 0 0 !important;
 }
 
-.colify-widget
-	.colify-markdown-preview-section
-	> :is(h2, :has(> h2)) {
-	margin-right: 0 !important;
-	margin-bottom: 0 !important;
-	margin-left: 0 !important;
-}
-
 .colify-widget .colify-markdown-surface h2,
 .colify-widget .colify-column-editor-host .cm-line.HyperMD-header-2 {
 	position: relative;
@@ -508,37 +600,7 @@
 
 .colify-widget
 	.colify-markdown-preview-section
-	> :is(h2, :has(> h2))
-	~ :not(h1, h2, :has(> h1), :has(> h2), .mod-footer) {
-	margin: 0 !important;
-	padding-right: var(--colify-section-body-inset);
-	padding-left: var(--colify-section-body-inset);
-	background: var(--colify-section-surface) !important;
-	border-right: 1px solid var(--colify-section-border) !important;
-	border-left: 1px solid var(--colify-section-border) !important;
-	border-radius: 0 !important;
-	box-shadow: none !important;
-}
-
-.colify-widget
-	.colify-markdown-preview-section
-	> :is(h2, :has(> h2))
-	+ :not(h1, h2, :has(> h1), :has(> h2), .mod-footer) {
-	padding-top: var(--colify-section-body-padding-top);
-}
-
-.colify-widget
-	.colify-markdown-preview-section
-	> :is(h2, :has(> h2))
-	~ :not(h1, h2, :has(> h1), :has(> h2), .mod-footer):last-child {
-	padding-bottom: var(--colify-section-body-padding-bottom);
-	border-bottom: 1px solid var(--colify-section-border) !important;
-	border-radius: 0 0 var(--colify-radius) var(--colify-radius) !important;
-}
-
-.colify-widget
-	.colify-markdown-preview-section
-	> :is(p, :has(> p))
+	> .colify-markdown-block
 	> p,
 .colify-widget
 	.colify-markdown-preview-section
@@ -782,6 +844,42 @@
 	transform: scale(1.12);
 }
 
+.colify-image-resize-handle:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 3px;
+}
+
+.colify-column-editor-host .colify-editor-image-widget {
+	display: block;
+	max-width: 100%;
+	cursor: default;
+	user-select: none;
+}
+
+.colify-column-editor-host .colify-editor-image-widget img {
+	display: block;
+	max-width: 100%;
+	height: auto;
+	pointer-events: auto;
+	-webkit-user-drag: none;
+}
+
+.colify-column-editor-host .colify-editor-image-widget.is-error {
+	padding: 0.45em 0.65em;
+	border: 1px solid var(--colify-border);
+	border-radius: var(--colify-radius-small);
+	color: var(--text-muted);
+	background: var(--background-secondary);
+}
+
+.colify-column-editor-host .colify-editor-image-widget.is-error img {
+	display: none;
+}
+
+.colify-column-editor-host .colify-editor-image-widget.is-error::after {
+	content: "图片无法显示";
+}
+
 .colify-reading-blank-line {
 	display: block;
 	height: calc(
@@ -820,6 +918,12 @@
 .colify-column-editor-host.is-colify-measuring {
 	min-height: 0;
 	max-height: none;
+}
+
+.colify-column-editor-host.is-colify-block-editor,
+.colify-column-editor-host.is-colify-block-editor .cm-editor,
+.colify-column-editor-host.is-colify-block-editor .cm-content {
+	min-height: 0;
 }
 
 .colify-column-editor-host[hidden] {
@@ -902,10 +1006,35 @@
 	opacity: 1;
 }
 
+.colify-resizer:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: -2px;
+}
+
+.colify-resizer:focus-visible::before {
+	width: 2px;
+	background: var(--interactive-accent);
+	opacity: 1;
+}
+
+.colify-resizer.is-long-press-pending::before {
+	width: 2px;
+	background: var(--colify-accent);
+	opacity: 0.55;
+}
+
 .colify-resizer.is-resizing::before {
 	width: 2px;
 	background: var(--colify-accent);
 	opacity: 1;
+}
+
+body.is-colify-resize-pending,
+body.is-colify-sidebar-locked,
+body.is-colify-resizing,
+body.is-colify-reordering-column {
+	touch-action: none !important;
+	overscroll-behavior: none;
 }
 
 body.is-colify-resizing,
@@ -914,6 +1043,38 @@ body.is-colify-resizing * {
 	user-select: none !important;
 }
 
+@media (pointer: coarse) {
+	.colify-resizer::after {
+		content: "";
+		position: absolute;
+		top: 0;
+		bottom: 0;
+		left: -8px;
+		right: -8px;
+	}
+}
+
+.colify-icon-plus::before,
+.colify-icon-plus::after {
+	content: "";
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	border-radius: 999px;
+	background: currentColor;
+	pointer-events: none;
+	transform: translate(-50%, -50%);
+}
+
+.colify-icon-plus::before {
+	width: 11px;
+	height: 1.5px;
+}
+
+.colify-icon-plus::after {
+	width: 1.5px;
+	height: 11px;
+}
 .colify-column-add-button {
 	position: absolute;
 	top: 14px;
@@ -931,11 +1092,6 @@ body.is-colify-resizing * {
 	color: var(--text-muted);
 	background: color-mix(in srgb, var(--background-primary) 82%, transparent);
 	box-shadow: none;
-	font-family: var(--font-interface);
-	font-size: 22px;
-	font-weight: var(--font-normal, 400);
-	line-height: 1;
-	letter-spacing: 0;
 	opacity: 0;
 	pointer-events: none;
 	cursor: pointer;
@@ -959,7 +1115,74 @@ body.is-colify-resizing * {
 	color: var(--colify-accent);
 	border-color: var(--colify-accent-line);
 	background: var(--colify-accent-soft);
-	outline: none;
+}
+
+.colify-column-add-button:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 2px;
+}
+
+.colify-column-delete-button {
+	position: absolute;
+	top: 4px;
+	right: 7px;
+	z-index: 6;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 18px;
+	padding: 0;
+	border: 1px solid transparent;
+	border-radius: var(--colify-radius-small);
+	color: var(--colify-muted);
+	background: transparent;
+	box-shadow: none;
+	opacity: 0.55;
+	cursor: pointer;
+	transition:
+		opacity 120ms ease,
+		color 120ms ease,
+		border-color 120ms ease,
+		background-color 120ms ease;
+}
+
+.colify-column-delete-button::before,
+.colify-column-delete-button::after {
+	content: "";
+	position: absolute;
+	width: 13px;
+	height: 1.5px;
+	border-radius: 999px;
+	background: currentColor;
+	pointer-events: none;
+}
+
+.colify-column-delete-button::before {
+	transform: rotate(45deg);
+}
+
+.colify-column-delete-button::after {
+	transform: rotate(-45deg);
+}
+
+.colify-column:hover > .colify-column-delete-button,
+.colify-column:focus-within > .colify-column-delete-button,
+.colify-column-delete-button:hover,
+.colify-column-delete-button:focus-visible {
+	opacity: 1;
+}
+
+.colify-column-delete-button:hover,
+.colify-column-delete-button:focus-visible {
+	color: var(--text-error);
+	border-color: color-mix(in srgb, var(--text-error) 42%, transparent);
+	background: color-mix(in srgb, var(--text-error) 10%, transparent);
+}
+
+.colify-column-delete-button:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 2px;
 }
 
 .colify-column-drag-handle {
@@ -983,6 +1206,7 @@ body.is-colify-resizing * {
 	line-height: 1;
 	letter-spacing: 0;
 	opacity: 0;
+	touch-action: none;
 	cursor: grab;
 	transform: translateX(-50%);
 	transition:
@@ -1005,7 +1229,11 @@ body.is-colify-resizing * {
 	color: var(--colify-accent);
 	border-color: var(--colify-accent-line);
 	background: var(--colify-accent-soft);
-	outline: none;
+}
+
+.colify-column-drag-handle:focus-visible {
+	outline: 2px solid var(--interactive-accent);
+	outline-offset: 2px;
 }
 
 .colify-column-drag-handle:active,

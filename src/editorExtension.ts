@@ -16,12 +16,11 @@ import {
 	WidgetType
 } from "@codemirror/view";
 
-import {
-	serializeColifyBlock
-} from "./colifyMarkdown";
+import { serializeColifyBlock } from "./colifyMarkdown";
 import type { ColifyBlock, ParsedColifyBlock } from "./colifyMarkdown";
 import {
 	cloneColifyBlock,
+	getColumnDeleteAction,
 	insertColifyColumn,
 	moveColifyColumn,
 	removeColifyColumn
@@ -29,28 +28,49 @@ import {
 import {
 	activateColumnEditor,
 	createColumnEditorView,
+	deactivateColumnEditor,
+	destroyColumnEditorView,
+	getActiveColumnEditorBlock,
 	getColumnEditorContent,
 	getColumnEditorView,
 	insertMarkdownIntoColumnEditor,
+	prepareColumnEditorContext,
 	scheduleColumnHeightSync,
-	syncColumnHeights
+	selectColumnEditorContent
 } from "./columnEditor";
 import { addColumnEditorMenuItems } from "./columnEditorMenu";
 import { renderColumnPreview } from "./columnPreview";
+import {
+	estimateColifyBlockHeight,
+	estimateColifyColumnHeight
+} from "./columnHeightEstimate";
 import { normalizeColumnWidths } from "./columnWidths";
 import {
 	applyColumnContainerLayout,
 	applyColumnWidths
 } from "./columnLayout";
-import { startColumnResize } from "./columnResize";
-import { clamp, normalizeLineEndings } from "./coreUtils";
+import {
+	configureColumnResizer,
+	lockWorkspaceSidebars,
+	startColumnResize,
+	TOUCH_GUARD_EVENTS
+} from "./columnResize";
+import {
+	clamp,
+	isDomInstance,
+	normalizeLineEndings
+} from "./coreUtils";
 import {
 	deleteColifyBlockFromEditor,
 	findColifyBlock,
 	findColifyBlockFromWidget,
 	replaceColifyBlockInEditor
 } from "./editorBlockTransactions";
-import { getParsedColifyBlocks } from "./editorParseCache";
+import {
+	changesIntroduceColifyStartMarker,
+	changesTouchParsedColifyBlocks,
+	getParsedColifyBlocks
+} from "./editorParseCache";
 import {
 	getDroppedColumnMarkdown,
 	getDroppedFiles,
@@ -67,22 +87,32 @@ import {
 	getMarkdownTableCellOffset,
 	getMarkdownTableStartOffset
 } from "./markdownTable";
+import { replaceMarkdownEditableBlock } from "./markdownEditableBlocks";
 
 type BlockUpdater = (block: ColifyBlock) => ColifyBlock;
 type ColifyWidgetElement = HTMLElement;
 
 interface ColifyWidgetResources {
+	block: ParsedColifyBlock;
 	columnEditorViews: EditorView[];
 	previewComponent: Component;
+	previewFrameId: number | null;
 	raw: string;
+	view: EditorView;
 }
 
 interface ColifyEditorExtensionContext {
 	app: App;
 	getSourcePath: () => string;
+	getTouchResizeLongPressMs: () => number;
 }
 
-let activeColumnMenu: Menu | null = null;
+interface ActiveWidgetMenu {
+	document: Document;
+	menu: Menu;
+}
+
+let activeColumnMenu: ActiveWidgetMenu | null = null;
 const colifyWidgetResources = new WeakMap<
 	ColifyWidgetElement,
 	ColifyWidgetResources
@@ -119,6 +149,8 @@ const PREVIEW_INTERACTIVE_SELECTOR = [
 	".table-wrapper",
 	".colify-table-cell-editor"
 ].join(", ");
+const EDITABLE_BLOCK_SELECTOR =
+	'.colify-markdown-block[data-colify-block-editable="true"]';
 
 export function createColifyEditorExtension(
 	context: ColifyEditorExtensionContext
@@ -129,6 +161,21 @@ export function createColifyEditorExtension(
 		},
 		update(decorations, transaction) {
 			if (transaction.docChanged) {
+				const previousBlocks = getParsedColifyBlocks(
+					transaction.startState
+				);
+				if (
+					!changesTouchParsedColifyBlocks(
+						transaction.changes,
+						previousBlocks
+					) &&
+					!changesIntroduceColifyStartMarker(
+						transaction.changes,
+						transaction.state
+					)
+				) {
+					return decorations.map(transaction.changes);
+				}
 				return buildColifyDecorations(transaction.state, context);
 			}
 
@@ -198,11 +245,16 @@ class ColifyBlockWidget extends WidgetType {
 		);
 	}
 
+	get estimatedHeight(): number {
+		return estimateColifyBlockHeight(this.block);
+	}
+
 	toDOM(view: EditorView): HTMLElement {
 		const previewComponent = new Component();
 		previewComponent.load();
+		const ownerDocument = view.dom.ownerDocument;
 
-		const root = activeDocument.createElement("div") as ColifyWidgetElement;
+		const root = ownerDocument.createElement("div") as ColifyWidgetElement;
 		root.className = [
 			"colify-widget",
 			`colify-widget--${this.block.metadata.background}`
@@ -211,35 +263,49 @@ class ColifyBlockWidget extends WidgetType {
 		root.dataset.colifyTo = String(this.block.to);
 		root.dataset.colifyColumns = String(this.block.columns.length);
 		const resources: ColifyWidgetResources = {
+			block: this.block,
 			columnEditorViews: [],
 			previewComponent,
-			raw: this.block.raw
+			previewFrameId: null,
+			raw: this.block.raw,
+			view
 		};
 		colifyWidgetResources.set(root, resources);
 		this.registerWidgetDropHandlers(view, root);
 
-		const columnsContainer = activeDocument.createElement("div");
+		const columnsContainer = ownerDocument.createElement("div");
 		columnsContainer.className = "colify-columns";
 		applyColumnContainerLayout(columnsContainer);
 		root.appendChild(columnsContainer);
 
 		const columnElements: HTMLElement[] = [];
+		const previewRenders: Array<() => void> = [];
 		const widths = normalizeColumnWidths(
 			this.block.metadata.widths,
 			this.block.columns.length
 		);
+		const estimatedColumnHeight = Math.max(
+			...this.block.columns.map((column) =>
+				estimateColifyColumnHeight(column.content)
+			)
+		);
 
 		this.block.columns.forEach((column, columnIndex) => {
-			const columnElement = activeDocument.createElement("section");
+			const columnElement = ownerDocument.createElement("section");
 			columnElement.className = "colify-column";
 			columnElement.dataset.colifyColumnIndex = String(columnIndex);
+			columnElement.dataset.colifyColumnHeight = `${estimatedColumnHeight}px`;
+			columnElement.setCssProps({
+				"--colify-column-height": `${estimatedColumnHeight}px`
+			});
 			columnElement.setAttribute("aria-label", `第 ${columnIndex + 1} 栏`);
 
-			const editorHost = activeDocument.createElement("div");
+			const editorHost = ownerDocument.createElement("div");
 			editorHost.className = "colify-column-editor-host";
 			editorHost.hidden = true;
 			editorHost.dataset.colifyOriginal = column.content;
 			editorHost.dataset.colifyContent = column.content;
+			editorHost.dataset.colifyColumnContent = column.content;
 			editorHost.dataset.colifyColumnIndex = String(columnIndex);
 
 			const ensureColumnEditor = (): EditorView => {
@@ -249,11 +315,19 @@ class ColifyBlockWidget extends WidgetType {
 				}
 
 				const columnEditor = createColumnEditorView({
+					app: this.context.app,
 					editorHost,
 					initialContent: editorHost.dataset.colifyContent ?? "",
 					isColumnReordering: () =>
 						getDraggingColumnIndex(root) !== null,
 					onCommit: () => commitEditedColumns(view, root),
+					onSelectAll: () =>
+						selectColifyColumn(
+							view,
+							root,
+							columnIndex,
+							editorHost
+						),
 					onContextMenu: (event, innerView) => {
 						this.showColumnMenu(
 							view,
@@ -283,7 +357,8 @@ class ColifyBlockWidget extends WidgetType {
 						);
 					},
 					parentView: view,
-					root
+					root,
+					sourcePath: this.context.getSourcePath()
 				});
 				resources.columnEditorViews.push(columnEditor);
 				return columnEditor;
@@ -297,7 +372,7 @@ class ColifyBlockWidget extends WidgetType {
 					}
 
 					if (
-						event.target instanceof Node &&
+						isDomInstance(event.target, Node) &&
 						editorHost.contains(event.target)
 					) {
 						return;
@@ -309,9 +384,26 @@ class ColifyBlockWidget extends WidgetType {
 						columnElement,
 						event.target
 					);
-					const columnEditorView = ensureColumnEditor();
-					if (!renderedTableTarget) {
-						activateColumnEditor(view, root, editorHost);
+					ensureColumnEditor();
+					const blockElement = findEditablePreviewBlock(
+						columnElement,
+						event.target
+					);
+					let columnEditorView: EditorView | null = null;
+					if (renderedTableTarget) {
+						columnEditorView = prepareRenderedTableEditorContext(
+							view,
+							root,
+							columnIndex,
+							editorHost
+						);
+					} else if (blockElement) {
+						columnEditorView = activatePreviewBlock(
+							view,
+							root,
+							editorHost,
+							blockElement
+						);
 					}
 					moveEditorSelectionToRenderedTable(
 						columnElement,
@@ -360,7 +452,7 @@ class ColifyBlockWidget extends WidgetType {
 				const relatedTarget = event.relatedTarget;
 
 				if (
-					relatedTarget instanceof Node &&
+					isDomInstance(relatedTarget, Node) &&
 					columnElement.contains(relatedTarget)
 				) {
 					return;
@@ -392,7 +484,7 @@ class ColifyBlockWidget extends WidgetType {
 				{ capture: true }
 			);
 
-			const previewEl = activeDocument.createElement("div");
+			const previewEl = ownerDocument.createElement("div");
 			previewEl.className =
 				"colify-column-preview colify-markdown-surface markdown-rendered";
 			previewEl.dataset.colifyRendered = "true";
@@ -407,31 +499,39 @@ class ColifyBlockWidget extends WidgetType {
 				if (shouldLetPreviewHandleEvent(event.target)) {
 					return;
 				}
+				const blockElement = findEditablePreviewBlock(
+					columnElement,
+					event.target
+				);
+				if (!blockElement) {
+					return;
+				}
 
 				event.preventDefault();
 				event.stopPropagation();
 				ensureColumnEditor();
-				activateColumnEditor(view, root, editorHost);
+				activatePreviewBlock(
+					view,
+					root,
+					editorHost,
+					blockElement
+				);
 			});
 			previewEl.addEventListener("mousedown", (event) => {
-				if (shouldLetPreviewHandleEvent(event.target)) {
+				if (
+					shouldLetPreviewHandleEvent(event.target) ||
+					!findEditablePreviewBlock(columnElement, event.target)
+				) {
 					return;
 				}
 
 				event.stopPropagation();
 			});
-			renderEditableColumnPreview(
-				this.context,
-				previewComponent,
-				previewEl,
-				column.content,
-				view,
-				root,
-				columnIndex
-			);
-
 			columnElement.appendChild(
-				this.createColumnDragHandle(root, columnIndex)
+				this.createColumnDragHandle(view, root, columnIndex)
+			);
+			columnElement.appendChild(
+				this.createColumnDeleteButton(view, root, columnIndex)
 			);
 
 			if (columnIndex === this.block.columns.length - 1) {
@@ -444,51 +544,138 @@ class ColifyBlockWidget extends WidgetType {
 			columnElement.appendChild(editorHost);
 			columnsContainer.appendChild(columnElement);
 			columnElements.push(columnElement);
+			previewRenders.push(() => {
+				renderEditableColumnPreview(
+					this.context,
+					previewComponent,
+					previewEl,
+					column.content,
+					view,
+					root,
+					columnIndex
+				);
+			});
 
 			if (columnIndex < this.block.columns.length - 1) {
-				const resizer = activeDocument.createElement("div");
+				const resizer = ownerDocument.createElement("div");
 				resizer.className = "colify-resizer";
-				resizer.setAttribute("role", "separator");
-				resizer.setAttribute("aria-orientation", "vertical");
 				resizer.title = "拖拽调整宽度";
-				resizer.addEventListener("mousedown", (event) => {
-					commitEditedColumns(view, root);
+				const commitWidths = (widths: number[]): void => {
+					this.updateBlock(view, root, (block) => ({
+						...block,
+						metadata: { ...block.metadata, widths }
+					}));
+				};
+				configureColumnResizer({
+					leftColumnIndex: columnIndex,
+					columnElements,
+					columnsContainer,
+					initialWidths: this.block.metadata.widths,
+					onBeforeResize: () => commitEditedColumns(view, root),
+					onCommit: commitWidths,
+					resizer
+				});
+				resizer.addEventListener("pointerdown", (event) => {
 					startColumnResize({
+						app: this.context.app,
 						event,
 						leftColumnIndex: columnIndex,
 						columnElements,
 						columnsContainer,
 						initialWidths: this.block.metadata.widths,
+						longPressMs: this.context.getTouchResizeLongPressMs(),
+						onBeforeResize: () => commitEditedColumns(view, root),
 						resizer,
-						onCommit: (widths) => {
-							this.updateBlock(view, root, (block) => ({
-								...block,
-								metadata: { ...block.metadata, widths }
-							}));
-						}
+						onCommit: commitWidths
 					});
 				});
 				columnsContainer.appendChild(resizer);
 			}
 		});
 		applyColumnWidths(columnElements, widths);
+		const renderPreviews = (): void => {
+			resources.previewFrameId = null;
+			if (colifyWidgetResources.get(root) !== resources) {
+				return;
+			}
 
-		window.requestAnimationFrame(() => {
-			syncColumnHeights(root);
-			view.requestMeasure();
-		});
+			for (const renderPreview of previewRenders) {
+				renderPreview();
+			}
+		};
+		const ownerWindow = ownerDocument.defaultView;
+		if (ownerWindow) {
+			resources.previewFrameId = ownerWindow.requestAnimationFrame(renderPreviews);
+		} else {
+			renderPreviews();
+		}
+
 		return root;
 	}
 
-	updateDOM(dom: HTMLElement): boolean {
+	updateDOM(dom: HTMLElement, view: EditorView): boolean {
 		const resources = colifyWidgetResources.get(dom);
-		if (!resources || resources.raw !== this.block.raw) {
+		if (!resources) {
+			return false;
+		}
+		resources.block = this.block;
+		const columnElements = Array.from(
+			dom.querySelectorAll<HTMLElement>(".colify-column")
+		);
+		if (columnElements.length !== this.block.columns.length) {
 			return false;
 		}
 
 		dom.dataset.colifyFrom = String(this.block.from);
 		dom.dataset.colifyTo = String(this.block.to);
 		dom.dataset.colifyColumns = String(this.block.columns.length);
+		if (resources.raw === this.block.raw) {
+			return true;
+		}
+
+		resources.raw = this.block.raw;
+		dom.classList.remove(
+			"colify-widget--transparent",
+			"colify-widget--soft",
+			"colify-widget--highlight"
+		);
+		dom.classList.add(`colify-widget--${this.block.metadata.background}`);
+		applyColumnWidths(
+			columnElements,
+			normalizeColumnWidths(
+				this.block.metadata.widths,
+				this.block.columns.length
+			)
+		);
+
+		this.block.columns.forEach((column, columnIndex) => {
+			const columnElement = columnElements[columnIndex];
+			const previewElement = columnElement?.querySelector<HTMLElement>(
+				".colify-column-preview"
+			);
+			const editorHost = columnElement?.querySelector<HTMLElement>(
+				".colify-column-editor-host"
+			);
+			if (!previewElement || !editorHost) {
+				return;
+			}
+			if (editorHost.hidden) {
+				editorHost.dataset.colifyOriginal = column.content;
+				editorHost.dataset.colifyContent = column.content;
+				editorHost.dataset.colifyColumnContent = column.content;
+				delete editorHost.dataset.colifyEditorMode;
+				delete editorHost.dataset.colifyColumnContextDirty;
+			}
+			renderEditableColumnPreviewAtomically(
+				this.context,
+				resources.previewComponent,
+				previewElement,
+				column.content,
+				view,
+				dom,
+				columnIndex
+			);
+		});
 		return true;
 	}
 
@@ -501,12 +688,18 @@ class ColifyBlockWidget extends WidgetType {
 		if (!resources) {
 			return;
 		}
+		const ownerWindow = dom.ownerDocument.defaultView;
+		if (ownerWindow && resources.previewFrameId !== null) {
+			ownerWindow.cancelAnimationFrame(resources.previewFrameId);
+		}
 
+		const pendingEdit = capturePendingWidgetEdit(dom, resources);
 		for (const columnEditorView of resources.columnEditorViews) {
-			columnEditorView.destroy();
+			destroyColumnEditorView(columnEditorView);
 		}
 		resources.previewComponent.unload();
 		colifyWidgetResources.delete(dom);
+		schedulePendingWidgetEditCommit(pendingEdit);
 	}
 
 	private registerWidgetDropHandlers(
@@ -565,7 +758,7 @@ class ColifyBlockWidget extends WidgetType {
 			(event) => {
 				const relatedTarget = event.relatedTarget;
 
-				if (relatedTarget instanceof Node && root.contains(relatedTarget)) {
+				if (isDomInstance(relatedTarget, Node) && root.contains(relatedTarget)) {
 					return;
 				}
 
@@ -634,12 +827,11 @@ class ColifyBlockWidget extends WidgetType {
 		root: ColifyWidgetElement,
 		columnIndex: number
 	): HTMLButtonElement {
-		const addButton = activeDocument.createElement("button");
-		addButton.className = "colify-column-add-button";
+		const addButton = root.ownerDocument.createElement("button");
+		addButton.className = "colify-column-add-button colify-icon-plus";
 		addButton.type = "button";
 		addButton.ariaLabel = "在右侧新增栏";
 		addButton.title = "在右侧新增栏";
-		addButton.textContent = "+";
 		addButton.addEventListener("mousedown", (event) => {
 			event.preventDefault();
 			event.stopPropagation();
@@ -654,11 +846,36 @@ class ColifyBlockWidget extends WidgetType {
 		return addButton;
 	}
 
-	private createColumnDragHandle(
+	private createColumnDeleteButton(
+		view: EditorView,
 		root: ColifyWidgetElement,
 		columnIndex: number
 	): HTMLButtonElement {
-		const dragHandle = activeDocument.createElement("button");
+		const deleteButton = root.ownerDocument.createElement("button");
+		const deletesBlock = this.block.columns.length <= 1;
+		const label = deletesBlock ? "删除整个分栏" : "删除该栏";
+		deleteButton.className = "colify-column-delete-button";
+		deleteButton.type = "button";
+		deleteButton.ariaLabel = label;
+		deleteButton.title = label;
+		deleteButton.addEventListener("mousedown", (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+		});
+		deleteButton.addEventListener("click", (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+			this.deleteColumn(view, root, columnIndex);
+		});
+		return deleteButton;
+	}
+
+	private createColumnDragHandle(
+		view: EditorView,
+		root: ColifyWidgetElement,
+		columnIndex: number
+	): HTMLButtonElement {
+		const dragHandle = root.ownerDocument.createElement("button");
 		dragHandle.className = "colify-column-drag-handle";
 		dragHandle.type = "button";
 		dragHandle.draggable = true;
@@ -671,6 +888,192 @@ class ColifyBlockWidget extends WidgetType {
 		dragHandle.addEventListener("click", (event) => {
 			event.preventDefault();
 			event.stopPropagation();
+		});
+		dragHandle.addEventListener("pointerdown", (event) => {
+			if (
+				event.pointerType === "mouse" ||
+				event.button !== 0 ||
+				!event.isPrimary
+			) {
+				return;
+			}
+
+			event.preventDefault();
+			event.stopImmediatePropagation();
+			const ownerDocument = root.ownerDocument;
+			const ownerWindow = ownerDocument.defaultView;
+			const pointerTarget: EventTarget = ownerWindow ?? ownerDocument;
+			const useCapture = ownerWindow !== null;
+			const pointerId = event.pointerId;
+			const sidebarLock = lockWorkspaceSidebars(this.context.app);
+			let insertColumnIndex: number | null = null;
+			let finished = false;
+			let pointerCaptured = false;
+
+			root.dataset.colifyDraggingColumn = String(columnIndex);
+			root.classList.add("is-colify-dragging-column");
+			dragHandle.classList.add("is-dragging");
+			ownerDocument.body.classList.add(
+				"is-colify-reordering-column",
+				"is-colify-sidebar-locked"
+			);
+			sidebarLock.enforce();
+
+			try {
+				dragHandle.setPointerCapture(pointerId);
+				pointerCaptured = true;
+			} catch {
+				// Capture listeners below still keep the touch sequence exclusive.
+			}
+
+			function consumePointerEvent(pointerEvent: PointerEvent): void {
+				pointerEvent.preventDefault();
+				pointerEvent.stopImmediatePropagation();
+				sidebarLock.enforce();
+			}
+
+			function updateDropTarget(pointerEvent: PointerEvent): void {
+				const target = getColumnDropTargetAtPoint(
+					root,
+					pointerEvent.clientX,
+					pointerEvent.clientY
+				);
+				if (!target) {
+					insertColumnIndex = null;
+					clearColumnDropIndicators(root);
+					return;
+				}
+				insertColumnIndex = target.insertColumnIndex;
+				markColumnDropTarget(
+					root,
+					target.columnElement,
+					target.insertColumnIndex,
+					target.columnIndex
+				);
+			}
+
+			function removeSequenceListeners(): void {
+				pointerTarget.removeEventListener(
+					"pointermove",
+					onPointerMove as EventListener,
+					useCapture
+				);
+				pointerTarget.removeEventListener(
+					"pointerup",
+					onPointerEnd as EventListener,
+					useCapture
+				);
+				pointerTarget.removeEventListener(
+					"pointercancel",
+					onPointerCancel as EventListener,
+					useCapture
+				);
+				dragHandle.removeEventListener(
+					"lostpointercapture",
+					onLostPointerCapture
+				);
+				ownerWindow?.removeEventListener("blur", onWindowBlur);
+				if (ownerWindow) {
+					for (const eventName of TOUCH_GUARD_EVENTS) {
+						ownerWindow.removeEventListener(
+							eventName,
+							onGuardedTouchEvent,
+							true
+						);
+					}
+				}
+			}
+
+			const finishReorder = (commit: boolean): void => {
+				if (finished) {
+					return;
+				}
+				finished = true;
+				removeSequenceListeners();
+				if (pointerCaptured && dragHandle.hasPointerCapture(pointerId)) {
+					dragHandle.releasePointerCapture(pointerId);
+				}
+				delete root.dataset.colifyDraggingColumn;
+				root.classList.remove("is-colify-dragging-column");
+				dragHandle.classList.remove("is-dragging");
+				clearColumnDropIndicators(root);
+				ownerDocument.body.classList.remove(
+					"is-colify-reordering-column",
+					"is-colify-sidebar-locked"
+				);
+				sidebarLock.release();
+
+				if (
+					commit &&
+					insertColumnIndex !== null &&
+					insertColumnIndex !== columnIndex &&
+					insertColumnIndex !== columnIndex + 1
+				) {
+					this.updateBlock(view, root, (block) =>
+						moveColifyColumn(block, columnIndex, insertColumnIndex ?? columnIndex)
+					);
+				}
+			};
+
+			const onPointerMove = (moveEvent: PointerEvent): void => {
+				if (moveEvent.pointerId !== pointerId) {
+					return;
+				}
+				consumePointerEvent(moveEvent);
+				updateDropTarget(moveEvent);
+			};
+			const onPointerEnd = (endEvent: PointerEvent): void => {
+				if (endEvent.pointerId !== pointerId) {
+					return;
+				}
+				consumePointerEvent(endEvent);
+				updateDropTarget(endEvent);
+				finishReorder(true);
+			};
+			const onPointerCancel = (cancelEvent: PointerEvent): void => {
+				if (cancelEvent.pointerId !== pointerId) {
+					return;
+				}
+				consumePointerEvent(cancelEvent);
+				finishReorder(false);
+			};
+			const onLostPointerCapture = (lostEvent: PointerEvent): void => {
+				if (lostEvent.pointerId === pointerId) {
+					finishReorder(false);
+				}
+			};
+			const onWindowBlur = (): void => finishReorder(false);
+			const onGuardedTouchEvent = (touchEvent: Event): void => {
+				touchEvent.preventDefault();
+				touchEvent.stopImmediatePropagation();
+				sidebarLock.enforce();
+			};
+
+			pointerTarget.addEventListener(
+				"pointermove",
+				onPointerMove as EventListener,
+				{ capture: useCapture, passive: false }
+			);
+			pointerTarget.addEventListener(
+				"pointerup",
+				onPointerEnd as EventListener,
+				{ capture: useCapture, passive: false }
+			);
+			pointerTarget.addEventListener(
+				"pointercancel",
+				onPointerCancel as EventListener,
+				{ capture: useCapture, passive: false }
+			);
+			dragHandle.addEventListener("lostpointercapture", onLostPointerCapture);
+			ownerWindow?.addEventListener("blur", onWindowBlur);
+			if (ownerWindow) {
+				for (const eventName of TOUCH_GUARD_EVENTS) {
+					ownerWindow.addEventListener(eventName, onGuardedTouchEvent, {
+						capture: true,
+						passive: false
+					});
+				}
+			}
 		});
 		dragHandle.addEventListener("dragstart", (event) => {
 			event.stopPropagation();
@@ -716,14 +1119,13 @@ class ColifyBlockWidget extends WidgetType {
 
 		menu.addItem((item) => {
 			item
-				.setTitle("删除该栏")
-				.setIcon("minus")
-				.setDisabled(this.block.columns.length <= 1)
+				.setTitle(
+					this.block.columns.length <= 1 ? "删除整个分栏" : "删除该栏"
+				)
+				.setIcon(this.block.columns.length <= 1 ? "trash-2" : "minus")
 				.onClick(() => {
 					menu.hide();
-					this.updateBlock(view, root, (block) =>
-						removeColifyColumn(block, columnIndex)
-					);
+					this.deleteColumn(view, root, columnIndex);
 				});
 		});
 
@@ -740,6 +1142,29 @@ class ColifyBlockWidget extends WidgetType {
 		});
 
 		menu.showAtMouseEvent(event);
+	}
+
+	private deleteColumn(
+		view: EditorView,
+		root: ColifyWidgetElement,
+		columnIndex: number
+	): void {
+		const currentBlock = findColifyBlockFromWidget(view.state, root);
+		if (!currentBlock) {
+			return;
+		}
+
+		const writableBlock = toWritableBlockWithEditorContent(currentBlock, root);
+		if (getColumnDeleteAction(writableBlock.columns.length) === "delete-block") {
+			deleteColifyBlockFromEditor(view, root);
+			return;
+		}
+
+		replaceColifyBlockInEditor(
+			view,
+			currentBlock,
+			removeColifyColumn(writableBlock, columnIndex)
+		);
 	}
 
 	private updateBlock(
@@ -764,23 +1189,50 @@ class ColifyBlockWidget extends WidgetType {
 }
 
 function closeActiveColumnMenu(): void {
-	const menu = activeColumnMenu;
+	const activeMenu = activeColumnMenu;
 	activeColumnMenu = null;
-	menu?.hide();
+	if (!activeMenu) {
+		return;
+	}
+
+	activeMenu.document.removeEventListener(
+		"pointerdown",
+		dismissActiveColumnMenu,
+		true
+	);
+	activeMenu.menu.hide();
 }
 
 function createWidgetMenu(root: ColifyWidgetElement): Menu {
 	closeActiveColumnMenu();
 
 	const menu = new Menu();
-	activeColumnMenu = menu;
+	const document = root.ownerDocument;
+	activeColumnMenu = { document, menu };
+	document.addEventListener("pointerdown", dismissActiveColumnMenu, true);
 	menu.setParentElement(root);
 	menu.onHide(() => {
-		if (activeColumnMenu === menu) {
+		if (activeColumnMenu?.menu === menu) {
+			document.removeEventListener(
+				"pointerdown",
+				dismissActiveColumnMenu,
+				true
+			);
 			activeColumnMenu = null;
 		}
 	});
 	return menu;
+}
+
+function dismissActiveColumnMenu(event: PointerEvent): void {
+	if (
+		isDomInstance(event.target, Element) &&
+		event.target.closest(".menu")
+	) {
+		return;
+	}
+
+	closeActiveColumnMenu();
 }
 
 function showImageMenu(
@@ -861,24 +1313,148 @@ function renderEditableColumnPreview(
 					);
 				}
 			},
-			onRendered: () => scheduleColumnHeightSync(view, root),
-			onTableChange: (nextContent) => {
+			onRendered: () => {
+				activatePendingPreviewBlock(view, root, container);
+				scheduleColumnHeightSync(view, root);
+			},
+			onTableChange: (change) => {
 				updateColumnContent(
 					view,
 					root,
 					columnIndex,
-					() => nextContent
+					(currentContent) =>
+						typeof change === "function"
+							? change(currentContent)
+							: change
 				);
 			}
 		}
 	);
-	if (content.length > 0) {
-		scheduleColumnHeightSync(view, root);
-	}
+}
+
+function renderEditableColumnPreviewAtomically(
+	context: ColifyEditorExtensionContext,
+	component: Component,
+	container: HTMLElement,
+	content: string,
+	view: EditorView,
+	root: ColifyWidgetElement,
+	columnIndex: number
+): void {
+	renderColumnPreview(
+		container,
+		content,
+		{
+			app: context.app,
+			component,
+			sourcePath: context.getSourcePath()
+		},
+		{
+			imageHandlers: {
+				onResizeTo: (imageIndex, width) => {
+					updateColumnContent(view, root, columnIndex, (markdown) =>
+						setColifyImageWidth(markdown, imageIndex, width)
+					);
+				},
+				onOpenMenu: (imageIndex, event) => {
+					showImageMenu(view, root, columnIndex, imageIndex, event);
+				}
+			},
+			onRendered: () => {
+				activatePendingPreviewBlock(view, root, container);
+				scheduleColumnHeightSync(view, root);
+			},
+			onTableChange: (change) => {
+				updateColumnContent(view, root, columnIndex, (currentContent) =>
+					typeof change === "function" ? change(currentContent) : change
+				);
+			},
+			preserveExistingUntilRendered: true
+		}
+	);
 }
 
 function shouldLetPreviewHandleEvent(target: EventTarget | null): boolean {
 	return hasClosestElement(target, PREVIEW_INTERACTIVE_SELECTOR);
+}
+
+function findEditablePreviewBlock(
+	columnElement: HTMLElement,
+	target: EventTarget | null
+): HTMLElement | null {
+	if (!isDomInstance(target, Element)) {
+		return null;
+	}
+
+	const blockElement = target.closest<HTMLElement>(EDITABLE_BLOCK_SELECTOR);
+	const previewElement = columnElement.querySelector<HTMLElement>(
+		".colify-column-preview"
+	);
+	return blockElement && previewElement?.contains(blockElement)
+		? blockElement
+		: null;
+}
+
+function activatePreviewBlock(
+	view: EditorView,
+	root: ColifyWidgetElement,
+	editorHost: HTMLElement,
+	blockElement: HTMLElement
+): EditorView | null {
+	const editorView = getColumnEditorView(editorHost);
+	if (!editorView) {
+		return null;
+	}
+	if (getActiveColumnEditorBlock(editorHost) === blockElement) {
+		activateColumnEditor(view, root, editorHost, blockElement);
+		return editorView;
+	}
+
+	const editingHost = root.querySelector<HTMLElement>(
+		".colify-column.is-editing .colify-column-editor-host"
+	);
+	if (editingHost) {
+		const columnElement = editorHost.closest<HTMLElement>(".colify-column");
+		const blockIndex = blockElement.dataset.colifyBlockIndex;
+		if (columnElement && blockIndex !== undefined) {
+			columnElement.dataset.colifyPendingBlockIndex = blockIndex;
+		}
+		if (commitEditedColumns(view, root)) {
+			return null;
+		}
+		if (columnElement) {
+			delete columnElement.dataset.colifyPendingBlockIndex;
+		}
+	}
+
+	activateColumnEditor(view, root, editorHost, blockElement);
+	return editorView;
+}
+
+function activatePendingPreviewBlock(
+	view: EditorView,
+	root: ColifyWidgetElement,
+	container: HTMLElement
+): void {
+	const columnElement = container.closest<HTMLElement>(".colify-column");
+	const blockIndex = columnElement?.dataset.colifyPendingBlockIndex;
+	if (!columnElement || blockIndex === undefined) {
+		return;
+	}
+
+	delete columnElement.dataset.colifyPendingBlockIndex;
+	const editorHost = columnElement.querySelector<HTMLElement>(
+		".colify-column-editor-host"
+	);
+	const blockElement = container.querySelector<HTMLElement>(
+		EDITABLE_BLOCK_SELECTOR +
+			'[data-colify-block-index="' +
+			blockIndex +
+			'"]'
+	);
+	if (editorHost && blockElement) {
+		activateColumnEditor(view, root, editorHost, blockElement);
+	}
 }
 
 function shouldBlockPreviewNativeDrag(target: EventTarget | null): boolean {
@@ -900,7 +1476,7 @@ function isRenderedTableTarget(
 	columnElement: HTMLElement,
 	target: EventTarget | null
 ): boolean {
-	if (!(target instanceof Element)) {
+	if (!isDomInstance(target, Element)) {
 		return false;
 	}
 
@@ -913,7 +1489,7 @@ function hasClosestElement(
 	target: EventTarget | null,
 	selector: string
 ): boolean {
-	return target instanceof Element && Boolean(target.closest(selector));
+	return isDomInstance(target, Element) && Boolean(target.closest(selector));
 }
 
 function moveEditorSelectionToRenderedTable(
@@ -921,7 +1497,7 @@ function moveEditorSelectionToRenderedTable(
 	target: EventTarget | null,
 	editorView: EditorView | null
 ): void {
-	if (!(target instanceof Element) || !editorView) {
+	if (!isDomInstance(target, Element) || !editorView) {
 		return;
 	}
 
@@ -957,6 +1533,37 @@ function moveEditorSelectionToRenderedTable(
 	if (sourceOffset !== null) {
 		editorView.dispatch({ selection: EditorSelection.cursor(sourceOffset) });
 	}
+}
+
+function prepareRenderedTableEditorContext(
+	view: EditorView,
+	root: ColifyWidgetElement,
+	columnIndex: number,
+	editorHost: HTMLElement
+): EditorView | null {
+	const currentBlock = findColifyBlockFromWidget(view.state, root);
+	if (!currentBlock) {
+		return null;
+	}
+
+	const writableBlock = toWritableBlockWithEditorContent(currentBlock, root);
+	const safeColumnIndex = getSafeColumnIndex(
+		columnIndex,
+		writableBlock.columns.length
+	);
+	const columnContent =
+		writableBlock.columns[safeColumnIndex]?.content ?? "";
+	const persistedContent = currentBlock.columns[safeColumnIndex]?.content ?? "";
+	const editorView = prepareColumnEditorContext(
+		view,
+		root,
+		editorHost,
+		columnContent
+	);
+	editorHost.dataset.colifyColumnContextDirty = String(
+		columnContent !== persistedContent
+	);
+	return editorView;
 }
 
 function findColumnAtPointer(
@@ -996,7 +1603,7 @@ function findColumnFromEventTarget(
 	root: ColifyWidgetElement,
 	target: EventTarget | null
 ): HTMLElement | null {
-	if (!(target instanceof HTMLElement)) {
+	if (!isDomInstance(target, HTMLElement)) {
 		return null;
 	}
 
@@ -1112,6 +1719,85 @@ function appendMarkdownToContent(content: string, insertion: string): string {
 	return `${content}${content.endsWith("\n") ? "" : "\n"}${insertion}`;
 }
 
+interface PendingWidgetEdit {
+	block: ParsedColifyBlock;
+	nextBlock: ColifyBlock;
+	view: EditorView;
+}
+
+function capturePendingWidgetEdit(
+	root: ColifyWidgetElement,
+	resources: ColifyWidgetResources
+): PendingWidgetEdit | null {
+	const currentBlock =
+		findColifyBlockFromWidget(resources.view.state, root) ??
+		findColifyBlock(resources.view.state, resources.block);
+	if (!currentBlock) {
+		return null;
+	}
+
+	const nextBlock = toWritableBlockWithEditorContent(currentBlock, root);
+	if (serializeColifyBlock(nextBlock) === currentBlock.raw) {
+		return null;
+	}
+
+	return { block: currentBlock, nextBlock, view: resources.view };
+}
+
+function schedulePendingWidgetEditCommit(
+	pendingEdit: PendingWidgetEdit | null
+): void {
+	if (!pendingEdit) {
+		return;
+	}
+
+	void Promise.resolve().then(() => {
+		const parsedBlocks = getParsedColifyBlocks(pendingEdit.view.state);
+		const currentBlock =
+			parsedBlocks.find(
+				(block) =>
+					block.from === pendingEdit.block.from &&
+					block.raw === pendingEdit.block.raw
+			) ??
+			parsedBlocks.find((block) => block.raw === pendingEdit.block.raw);
+		if (!currentBlock) {
+			return;
+		}
+
+		replaceColifyBlockInEditor(
+			pendingEdit.view,
+			currentBlock,
+			pendingEdit.nextBlock
+		);
+	});
+}
+
+function selectColifyColumn(
+	view: EditorView,
+	root: ColifyWidgetElement,
+	columnIndex: number,
+	editorHost: HTMLElement
+): boolean {
+	const currentBlock = findColifyBlockFromWidget(view.state, root);
+	if (!currentBlock) {
+		return false;
+	}
+
+	const writableBlock = toWritableBlockWithEditorContent(currentBlock, root);
+	const safeColumnIndex = getSafeColumnIndex(
+		columnIndex,
+		writableBlock.columns.length
+	);
+	const columnContent = writableBlock.columns[safeColumnIndex]?.content ?? "";
+	const persistedContent = currentBlock.columns[safeColumnIndex]?.content ?? "";
+	return selectColumnEditorContent(
+		view,
+		root,
+		editorHost,
+		columnContent,
+		persistedContent
+	);
+}
 function commitEditedColumns(
 	view: EditorView,
 	root: ColifyWidgetElement
@@ -1124,6 +1810,7 @@ function commitEditedColumns(
 
 	const nextBlock = toWritableBlockWithEditorContent(currentBlock, root);
 	const serialized = serializeColifyBlock(nextBlock);
+	deactivateActiveColumnEditors(view, root);
 
 	if (serialized === currentBlock.raw) {
 		return false;
@@ -1131,6 +1818,20 @@ function commitEditedColumns(
 
 	replaceColifyBlockInEditor(view, currentBlock, nextBlock);
 	return true;
+}
+
+function deactivateActiveColumnEditors(
+	view: EditorView,
+	root: ColifyWidgetElement
+): void {
+	const editorHosts = Array.from(
+		root.querySelectorAll<HTMLElement>(
+			".colify-column.is-editing .colify-column-editor-host"
+		)
+	);
+	for (const editorHost of editorHosts) {
+		deactivateColumnEditor(view, root, editorHost);
+	}
 }
 
 function toWritableBlockWithEditorContent(
@@ -1148,9 +1849,48 @@ function toWritableBlockWithEditorContent(
 
 	return {
 		...writableBlock,
-		columns: editorHosts.map((editorHost) => ({
-			content: normalizeEditedContent(getColumnEditorContent(editorHost))
-		}))
+		columns: editorHosts.map((editorHost, columnIndex) => {
+			const currentContent =
+				writableBlock.columns[columnIndex]?.content ?? "";
+			const editorMode = editorHost.dataset.colifyEditorMode;
+			if (editorMode === "block") {
+				const blockFrom = Number(editorHost.dataset.colifyBlockFrom);
+				const blockTo = Number(editorHost.dataset.colifyBlockTo);
+				if (
+					Number.isInteger(blockFrom) &&
+					Number.isInteger(blockTo) &&
+					blockFrom >= 0 &&
+					blockTo >= blockFrom
+				) {
+					return {
+						content: replaceMarkdownEditableBlock(
+							currentContent,
+							{ from: blockFrom, to: blockTo },
+							normalizeEditedContent(
+								getColumnEditorContent(editorHost)
+							)
+						)
+					};
+				}
+			}
+
+			if (editorMode === "column-context") {
+				const editorContent = normalizeEditedContent(
+					getColumnEditorContent(editorHost)
+				);
+				const originalContent = normalizeEditedContent(
+					editorHost.dataset.colifyOriginal ?? ""
+				);
+				if (
+					editorHost.dataset.colifyColumnContextDirty === "true" ||
+					editorContent !== originalContent
+				) {
+					return { content: editorContent };
+				}
+			}
+
+			return { content: currentContent };
+		})
 	};
 }
 
@@ -1168,6 +1908,46 @@ function getColumnInsertionIndex(
 	return event.clientX < rect.left + rect.width / 2
 		? columnIndex
 		: columnIndex + 1;
+}
+function getColumnDropTargetAtPoint(
+	root: ColifyWidgetElement,
+	clientX: number,
+	clientY: number
+): {
+	columnElement: HTMLElement;
+	columnIndex: number;
+	insertColumnIndex: number;
+} | null {
+	const rootRect = root.getBoundingClientRect();
+	if (clientY < rootRect.top || clientY > rootRect.bottom) {
+		return null;
+	}
+	const columnElements = Array.from(
+		root.querySelectorAll<HTMLElement>(".colify-column")
+	);
+	if (columnElements.length === 0) {
+		return null;
+	}
+	let columnIndex = columnElements.findIndex((columnElement) => {
+		const rect = columnElement.getBoundingClientRect();
+		return clientX <= rect.right;
+	});
+	if (columnIndex < 0) {
+		columnIndex = columnElements.length - 1;
+	}
+	const columnElement = columnElements[columnIndex];
+	if (!columnElement) {
+		return null;
+	}
+	const rect = columnElement.getBoundingClientRect();
+	return {
+		columnElement,
+		columnIndex,
+		insertColumnIndex:
+			clientX < rect.left + rect.width / 2
+				? columnIndex
+				: columnIndex + 1
+	};
 }
 
 function markColumnDropTarget(

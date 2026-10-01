@@ -3,7 +3,14 @@ import { EditorView } from "@codemirror/view";
 import { htmlToMarkdown, Menu, Notice } from "obsidian";
 import type { MenuItem } from "obsidian";
 
+import { replaceEditorText } from "./columnEditorTransactions";
 import { buildBlockMarkdownInsertion } from "./markdownInsertion";
+import {
+	insertExternalMarkdownLink,
+	setParagraphStyle,
+	type ParagraphStyle,
+	wrapSelectionWith
+} from "./columnEditorFormatting";
 import {
 	applyMarkdownTableCommand,
 	getMarkdownTableContext
@@ -11,18 +18,6 @@ import {
 import type { MarkdownTableCommand } from "./markdownTable";
 
 type MenuFactory = () => Menu;
-type ParagraphStyle =
-	| "normal"
-	| "heading-1"
-	| "heading-2"
-	| "heading-3"
-	| "heading-4"
-	| "heading-5"
-	| "heading-6"
-	| "bullet"
-	| "numbered"
-	| "task"
-	| "quote";
 
 interface EditorMenuContext {
 	anchorEvent: MouseEvent;
@@ -43,8 +38,6 @@ interface SubmenuCapableMenuItem extends MenuItem {
 	setSubmenu?: () => Menu;
 }
 
-const PARAGRAPH_PREFIX_PATTERN = /^(?:#{1,6}\s+|[-*+]\s+\[[ xX]\]\s+|[-*+]\s+|\d+[.)]\s+|>\s?)/;
-
 export function addColumnEditorMenuItems(
 	menu: Menu,
 	view: EditorView,
@@ -64,12 +57,12 @@ export function addColumnEditorMenuItems(
 	addCommand(menu, {
 		icon: "link",
 		title: "新增链接",
-		run: () => wrapSelection(view, "[[", "]]", "链接")
+		run: () => wrapSelectionWith(view, "[[", "]]", "链接")
 	});
 	addCommand(menu, {
 		icon: "external-link",
 		title: "新增外部链接",
-		run: () => insertExternalLink(view)
+		run: () => insertExternalMarkdownLink(view)
 	});
 
 	menu.addSeparator();
@@ -87,27 +80,27 @@ export function addColumnEditorMenuItems(
 function addTextFormatItems(menu: Menu, context: EditorMenuContext): void {
 	const { view } = context;
 	const commands: MenuCommand[] = [
-		{ icon: "bold", title: "粗体", run: () => wrapSelection(view, "**") },
-		{ icon: "italic", title: "斜体", run: () => wrapSelection(view, "*") },
+		{ icon: "bold", title: "粗体", run: () => wrapSelectionWith(view, "**") },
+		{ icon: "italic", title: "斜体", run: () => wrapSelectionWith(view, "*") },
 		{
 			icon: "strikethrough",
 			title: "删除线",
-			run: () => wrapSelection(view, "~~")
+			run: () => wrapSelectionWith(view, "~~")
 		},
 		{
 			icon: "highlighter",
 			title: "高亮",
-			run: () => wrapSelection(view, "==")
+			run: () => wrapSelectionWith(view, "==")
 		},
 		{
 			icon: "code",
 			title: "行内代码",
-			run: () => wrapSelection(view, "`")
+			run: () => wrapSelectionWith(view, "`")
 		},
 		{
 			icon: "message-square-off",
 			title: "注释",
-			run: () => wrapSelection(view, "%%")
+			run: () => wrapSelectionWith(view, "%%")
 		}
 	];
 
@@ -416,135 +409,18 @@ function refocusEditorWhenMenuCloses(
 			return;
 		}
 
-		window.setTimeout(() => {
+		const ownerWindow = view.dom.ownerDocument.defaultView;
+		const refocus = (): void => {
 			if (view.dom.isConnected) {
 				view.focus();
 			}
-		});
-	});
-}
-
-function wrapSelection(
-	view: EditorView,
-	prefix: string,
-	suffix = prefix,
-	placeholder = ""
-): void {
-	const selection = view.state.selection.main;
-	const selectedText = view.state.sliceDoc(selection.from, selection.to);
-	const content = selectedText || placeholder;
-	const selectedIncludesMarkers =
-		selectedText.startsWith(prefix) &&
-		selectedText.endsWith(suffix) &&
-		selectedText.length >= prefix.length + suffix.length;
-
-	if (selectedIncludesMarkers) {
-		const unwrapped = selectedText.slice(prefix.length, -suffix.length);
-		dispatchReplacement(view, selection.from, selection.to, unwrapped, 0, unwrapped.length);
-		return;
-	}
-
-	const markersSurroundSelection =
-		selection.from >= prefix.length &&
-		view.state.sliceDoc(selection.from - prefix.length, selection.from) ===
-			prefix &&
-		view.state.sliceDoc(selection.to, selection.to + suffix.length) === suffix;
-
-	if (markersSurroundSelection) {
-		dispatchReplacement(
-			view,
-			selection.from - prefix.length,
-			selection.to + suffix.length,
-			selectedText,
-			0,
-			selectedText.length
-		);
-		return;
-	}
-
-	const replacement = `${prefix}${content}${suffix}`;
-	dispatchReplacement(
-		view,
-		selection.from,
-		selection.to,
-		replacement,
-		prefix.length,
-		prefix.length + content.length
-	);
-}
-
-function insertExternalLink(view: EditorView): void {
-	const selection = view.state.selection.main;
-	const selectedText = view.state.sliceDoc(selection.from, selection.to);
-	const label = selectedText || "链接";
-	const replacement = `[${label}](https://)`;
-	dispatchReplacement(
-		view,
-		selection.from,
-		selection.to,
-		replacement,
-		1,
-		1 + label.length
-	);
-}
-
-function setParagraphStyle(view: EditorView, style: ParagraphStyle): void {
-	const selection = view.state.selection.main;
-	const startLine = view.state.doc.lineAt(selection.from);
-	const endOffset = Math.max(selection.from, selection.to - Number(!selection.empty));
-	const endLine = view.state.doc.lineAt(endOffset);
-	const lines = [];
-
-	for (let lineNumber = startLine.number; lineNumber <= endLine.number; lineNumber++) {
-		lines.push(view.state.doc.line(lineNumber));
-	}
-
-	const allUseStyle =
-		style !== "normal" && lines.every((line) => matchesParagraphStyle(line.text, style));
-	const changes = lines.map((line, index) => {
-		const indentation = /^\s*/.exec(line.text)?.[0] ?? "";
-		const body = line.text.slice(indentation.length).replace(PARAGRAPH_PREFIX_PATTERN, "");
-		const prefix = allUseStyle ? "" : getParagraphPrefix(style, index);
-
-		return {
-			from: line.from,
-			to: line.to,
-			insert: `${indentation}${prefix}${body}`
 		};
+		if (ownerWindow) {
+			ownerWindow.setTimeout(refocus, 0);
+		} else {
+			refocus();
+		}
 	});
-
-	view.dispatch({ changes });
-}
-
-function matchesParagraphStyle(text: string, style: ParagraphStyle): boolean {
-	const content = text.trimStart();
-
-	if (style.startsWith("heading-")) {
-		return content.startsWith(`${"#".repeat(Number(style.slice(-1)))} `);
-	}
-
-	const patterns: Partial<Record<ParagraphStyle, RegExp>> = {
-		bullet: /^[-*+]\s+(?!\[[ xX]\]\s+)/,
-		numbered: /^\d+[.)]\s+/,
-		task: /^[-*+]\s+\[[ xX]\]\s+/,
-		quote: /^>\s?/
-	};
-	return patterns[style]?.test(content) ?? false;
-}
-
-function getParagraphPrefix(style: ParagraphStyle, lineIndex: number): string {
-	if (style.startsWith("heading-")) {
-		return `${"#".repeat(Number(style.slice(-1)))} `;
-	}
-
-	const prefixes: Record<Exclude<ParagraphStyle, `heading-${number}`>, string> = {
-		normal: "",
-		bullet: "- ",
-		numbered: `${lineIndex + 1}. `,
-		task: "- [ ] ",
-		quote: "> "
-	};
-	return prefixes[style as keyof typeof prefixes] ?? "";
 }
 
 function wrapBlock(view: EditorView, opening: string, closing: string): void {
@@ -602,13 +478,12 @@ function dispatchReplacement(
 	selectionFrom: number,
 	selectionTo: number
 ): void {
-	view.dispatch({
-		changes: { from, to, insert: replacement },
-		selection: EditorSelection.range(
-			from + selectionFrom,
-			from + selectionTo
-		),
-		scrollIntoView: true
+	replaceEditorText(view, {
+		from,
+		to,
+		replacement,
+		selectionFrom,
+		selectionTo
 	});
 }
 

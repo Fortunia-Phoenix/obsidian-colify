@@ -3,7 +3,7 @@ import { createAnimationFrameThrottle } from "./animationFrameThrottle";
 
 export type ColifyImageAlign = "left" | "center" | "right";
 
-interface ColifyImageDescriptor {
+export interface ColifyImageDescriptor {
 	width: number | null;
 	align: ColifyImageAlign | null;
 }
@@ -19,7 +19,7 @@ interface ColifyImageControlBinding {
 	imageWidth: number | null;
 }
 
-interface ParsedImageToken {
+export interface ParsedImageToken {
 	kind: "wiki" | "markdown";
 	from: number;
 	to: number;
@@ -29,7 +29,7 @@ interface ParsedImageToken {
 	width: number | null;
 }
 
-interface ParsedImageComment {
+export interface ParsedImageComment {
 	from: number;
 	to: number;
 	align: ColifyImageAlign | null;
@@ -37,10 +37,13 @@ interface ParsedImageComment {
 
 const IMAGE_TOKEN_PATTERN = /!\[\[([^\]\n]+)\]\]|!\[([^\]\n]*)\]\(([^)\n]+)\)/g;
 const IMAGE_COMMENT_PATTERN =
-	/(?:^|\n)([ \t]*<!--\s*colify:image\s+(\{[^]*?\})\s*-->\s*)$/;
+	/(?:^|\n)([ \t]*<!--\s*colify:image\s+(\{[^\r\n]*?\})\s*-->\s*)$/;
+const IMAGE_COMMENT_LINE_PATTERN =
+	/^[ \t]*<!--\s*colify:image\s+\{.*\}\s*-->[ \t]*$/;
 const DEFAULT_IMAGE_WIDTH = 360;
 const MIN_IMAGE_WIDTH = 80;
 const MAX_IMAGE_WIDTH = 1600;
+const KEYBOARD_IMAGE_RESIZE_STEP_PX = 16;
 const imageControlBindings = new WeakMap<
 	HTMLElement,
 	ColifyImageControlBinding
@@ -56,7 +59,9 @@ const IMAGE_EXTENSIONS = new Set([
 	"webp"
 ]);
 
-function getColifyImageDescriptors(markdown: string): ColifyImageDescriptor[] {
+export function getColifyImageDescriptors(
+	markdown: string
+): ColifyImageDescriptor[] {
 	return getImageTokens(markdown).map((token) => {
 		const comment = getImageCommentBefore(markdown, token.from);
 
@@ -101,16 +106,18 @@ export function setColifyImageAlign(
 
 	const comment = getImageCommentBefore(markdown, token.from);
 	const nextComment = `<!-- colify:image {"align":"${align}"} -->\n`;
+	const commentFrom = comment?.from ?? token.from;
+	const commentTo = comment?.to ?? token.from;
+	const beforeComment = markdown.slice(0, commentFrom);
+	const blockBoundary = getImageCommentBlockBoundary(beforeComment);
 
-	if (comment) {
-		return `${markdown.slice(0, comment.from)}${nextComment}${markdown.slice(
-			comment.to
-		)}`;
-	}
-
-	return `${markdown.slice(0, token.from)}${nextComment}${markdown.slice(
-		token.from
+	return `${beforeComment}${blockBoundary}${nextComment}${markdown.slice(
+		commentTo
 	)}`;
+}
+
+export function isColifyImageCommentLine(line: string): boolean {
+	return IMAGE_COMMENT_LINE_PATTERN.test(line);
 }
 
 export function applyColifyImageRendering(
@@ -162,7 +169,7 @@ export function applyColifyImageRendering(
 	});
 }
 
-function getImageTokens(markdown: string): ParsedImageToken[] {
+export function getImageTokens(markdown: string): ParsedImageToken[] {
 	const tokens: ParsedImageToken[] = [];
 	let match: RegExpExecArray | null;
 
@@ -223,7 +230,7 @@ function parseMarkdownImageToken(
 	};
 }
 
-function getImageCommentBefore(
+export function getImageCommentBefore(
 	markdown: string,
 	tokenFrom: number
 ): ParsedImageComment | null {
@@ -258,6 +265,17 @@ function parseImageAlign(metadataSource: string): ColifyImageAlign | null {
 	}
 
 	return null;
+}
+
+function getImageCommentBlockBoundary(beforeComment: string): string {
+	if (
+		beforeComment.trim().length === 0 ||
+		/\n[ \t]*\n[ \t]*$/.test(beforeComment)
+	) {
+		return "";
+	}
+
+	return beforeComment.endsWith("\n") ? "\n" : "\n\n";
 }
 
 function isColifyImageAlign(value: unknown): value is ColifyImageAlign {
@@ -297,7 +315,7 @@ function setTokenWidth(
 	return `![${nextAlt}](${token.markdownUrl ?? ""})`;
 }
 
-function getWikiFileTarget(wikiTarget: string): string {
+export function getWikiFileTarget(wikiTarget: string): string {
 	return wikiTarget.split("|")[0].trim();
 }
 
@@ -378,7 +396,14 @@ function ensureImageControls(
 ): void {
 	imageControlBindings.set(frame, { handlers, imageIndex, imageWidth });
 
-	if (frame.querySelector(".colify-image-resize-handle")) {
+	const existingHandle = frame.querySelector<HTMLElement>(
+		".colify-image-resize-handle"
+	);
+	if (existingHandle) {
+		updateImageResizeHandleValue(
+			existingHandle,
+			imageWidth ?? getRenderedImageWidth(frame)
+		);
 		return;
 	}
 
@@ -396,13 +421,46 @@ function ensureImageControls(
 	const handle = frame.ownerDocument.createElement("span");
 	handle.className = "colify-image-resize-handle";
 	handle.title = "拖动调整图片大小";
+	handle.tabIndex = 0;
 	handle.setAttribute("role", "separator");
 	handle.setAttribute("aria-label", "拖动调整图片大小");
+	handle.setAttribute("aria-orientation", "horizontal");
+	updateImageResizeHandleValue(
+		handle,
+		imageWidth ?? getRenderedImageWidth(frame)
+	);
 	handle.addEventListener("mousedown", (event) => {
 		const binding = imageControlBindings.get(frame);
 		if (binding) {
-			startImageResizeDrag(event, frame, binding);
+			startImageResizeDrag(event, frame, handle, binding);
 		}
+	});
+	handle.addEventListener("keydown", (event) => {
+		const direction =
+			event.key === "ArrowLeft"
+				? -1
+				: event.key === "ArrowRight"
+					? 1
+					: 0;
+		const binding = imageControlBindings.get(frame);
+		if (direction === 0 || !binding) {
+			return;
+		}
+
+		event.preventDefault();
+		event.stopPropagation();
+		const currentWidth = binding.imageWidth ?? getRenderedImageWidth(frame);
+		const nextWidth = clampImageWidth(
+			currentWidth + direction * KEYBOARD_IMAGE_RESIZE_STEP_PX
+		);
+		if (nextWidth === currentWidth) {
+			return;
+		}
+
+		applyImageWidth(frame, nextWidth);
+		binding.imageWidth = nextWidth;
+		updateImageResizeHandleValue(handle, nextWidth);
+		binding.handlers.onResizeTo(binding.imageIndex, nextWidth);
 	});
 	handle.addEventListener("click", (event) => {
 		event.preventDefault();
@@ -415,6 +473,7 @@ function ensureImageControls(
 function startImageResizeDrag(
 	event: MouseEvent,
 	frame: HTMLElement,
+	handle: HTMLElement,
 	binding: ColifyImageControlBinding
 ): void {
 	if (event.button !== 0) {
@@ -427,9 +486,7 @@ function startImageResizeDrag(
 	const ownerDocument = frame.ownerDocument;
 	const ownerWindow = ownerDocument.defaultView;
 	const startX = event.clientX;
-	const measuredWidth = Math.round(frame.getBoundingClientRect().width);
-	const fallbackWidth = measuredWidth > 0 ? measuredWidth : DEFAULT_IMAGE_WIDTH;
-	const startWidth = binding.imageWidth ?? fallbackWidth;
+	const startWidth = binding.imageWidth ?? getRenderedImageWidth(frame);
 	let nextWidth = clampImageWidth(startWidth);
 	let finished = false;
 
@@ -437,8 +494,8 @@ function startImageResizeDrag(
 
 	const applyLiveWidth = (width: number): void => {
 		nextWidth = clampImageWidth(width);
-		frame.dataset.colifyImageWidth = String(nextWidth);
-		frame.setCssProps({ "--colify-image-width": `${nextWidth}px` });
+		applyImageWidth(frame, nextWidth);
+		updateImageResizeHandleValue(handle, nextWidth);
 	};
 	const resizeFrames = createAnimationFrameThrottle(
 		ownerWindow,
@@ -460,6 +517,7 @@ function startImageResizeDrag(
 		ownerDocument.removeEventListener("mouseup", onMouseUp);
 		ownerWindow?.removeEventListener("blur", onWindowBlur);
 		frame.classList.remove("is-resizing");
+		binding.imageWidth = nextWidth;
 		binding.handlers.onResizeTo(binding.imageIndex, nextWidth);
 	};
 
@@ -475,4 +533,25 @@ function startImageResizeDrag(
 	ownerDocument.addEventListener("mousemove", onMouseMove);
 	ownerDocument.addEventListener("mouseup", onMouseUp);
 	ownerWindow?.addEventListener("blur", onWindowBlur);
+}
+
+function getRenderedImageWidth(frame: HTMLElement): number {
+	const measuredWidth = Math.round(frame.getBoundingClientRect().width);
+	return measuredWidth > 0 ? measuredWidth : DEFAULT_IMAGE_WIDTH;
+}
+
+function applyImageWidth(frame: HTMLElement, width: number): void {
+	frame.dataset.colifyImageWidth = String(width);
+	frame.setCssProps({ "--colify-image-width": `${width}px` });
+}
+
+function updateImageResizeHandleValue(
+	handle: HTMLElement,
+	width: number
+): void {
+	const normalizedWidth = clampImageWidth(width);
+	handle.setAttribute("aria-valuemin", String(MIN_IMAGE_WIDTH));
+	handle.setAttribute("aria-valuemax", String(MAX_IMAGE_WIDTH));
+	handle.setAttribute("aria-valuenow", String(normalizedWidth));
+	handle.setAttribute("aria-valuetext", `${normalizedWidth} pixels`);
 }

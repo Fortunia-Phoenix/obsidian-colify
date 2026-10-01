@@ -61,13 +61,19 @@ interface ParsedStartMarker {
 	metadataSource: string | null;
 }
 
+interface ParsedColumnMarker {
+	markerLength: number;
+	trailingContent: string;
+	trailingContentOffset: number;
+}
+
 interface ParsedMetadata {
 	metadata: ColifyBlockMetadata;
 	error: string | null;
 }
 
 const START_MARKER_PATTERN = /^<!--\s*colify:start(?:\s+(.+?))?\s*-->$/;
-const COLUMN_MARKER_PATTERN = /^<!--\s*colify:column\s*-->$/;
+const COLUMN_MARKER_PATTERN = /^(\s*<!--\s*colify:column\s*-->)(.*)$/;
 const END_MARKER_PATTERN = /^<!--\s*colify:end\s*-->$/;
 const DEFAULT_BACKGROUND: ColifyBackground = "transparent";
 const DEFAULT_COLUMN_CONTENTS = ["第一栏内容", "第二栏内容"];
@@ -212,6 +218,24 @@ function parseStartMarker(lineText: string): ParsedStartMarker | null {
 	};
 }
 
+function parseColumnMarker(lineText: string): ParsedColumnMarker | null {
+	const match = COLUMN_MARKER_PATTERN.exec(lineText);
+
+	if (!match) {
+		return null;
+	}
+
+	return {
+		markerLength: match[1].length,
+		trailingContent: match[2] ?? "",
+		trailingContentOffset: match[1].length
+	};
+}
+
+function countLeadingWhitespace(text: string): number {
+	return /^[ \t]*/.exec(text)?.[0].length ?? 0;
+}
+
 function findEndMarkerLine(lines: LineRecord[], fromLine: number): number {
 	for (let lineIndex = fromLine; lineIndex < lines.length; lineIndex++) {
 		if (END_MARKER_PATTERN.test(lines[lineIndex].text.trim())) {
@@ -230,7 +254,7 @@ function findColumnMarkerLines(
 	const columnLineIndexes: number[] = [];
 
 	for (let lineIndex = fromLine; lineIndex < toLine; lineIndex++) {
-		if (COLUMN_MARKER_PATTERN.test(lines[lineIndex].text.trim())) {
+		if (parseColumnMarker(lines[lineIndex].text)) {
 			columnLineIndexes.push(lineIndex);
 		}
 	}
@@ -245,27 +269,46 @@ function buildColumns(
 ): ParsedColifyColumn[] {
 	return columnLineIndexes.map((columnLineIndex, columnIndex) => {
 		const nextColumnLineIndex = columnLineIndexes[columnIndex + 1] ?? endLineIndex;
+		const markerLine = lines[columnLineIndex];
+		const marker = parseColumnMarker(markerLine.text);
+		const inlineContent = marker
+			? marker.trailingContent.trimStart()
+			: "";
 		const contentLines = lines
 			.slice(columnLineIndex + 1, nextColumnLineIndex)
 			.map((line) => line.text);
-		const hasContentLines = nextColumnLineIndex > columnLineIndex + 1;
+		if (inlineContent.length > 0) {
+			contentLines.unshift(inlineContent);
+		}
+
+		const hasContentLines = contentLines.length > 0;
 		const firstContentLine = hasContentLines
 			? lines[columnLineIndex + 1]
 			: null;
 		const lastContentLine = hasContentLines
 			? lines[nextColumnLineIndex - 1]
 			: null;
-		const contentFrom = firstContentLine
-			? firstContentLine.from
-			: lines[columnLineIndex].contentTo;
+		const inlineContentOffset =
+			marker && inlineContent.length > 0
+				? markerLine.from +
+					marker.trailingContentOffset +
+					countLeadingWhitespace(marker.trailingContent)
+				: null;
+		const contentFrom =
+			inlineContentOffset ??
+			(firstContentLine ? firstContentLine.from : markerLine.contentTo);
 		const contentTo =
-			lastContentLine && nextColumnLineIndex > columnLineIndex + 1
+			inlineContentOffset !== null && nextColumnLineIndex === columnLineIndex + 1
+				? markerLine.contentTo
+				: lastContentLine && nextColumnLineIndex > columnLineIndex + 1
 				? lastContentLine.contentTo
 				: contentFrom;
 
 		return {
-			markerFrom: lines[columnLineIndex].from,
-			markerTo: lines[columnLineIndex].contentTo,
+			markerFrom: markerLine.from,
+			markerTo: marker
+				? markerLine.from + marker.markerLength
+				: markerLine.contentTo,
 			contentFrom,
 			contentTo,
 			content: normalizeLineEndings(contentLines.join("\n"))

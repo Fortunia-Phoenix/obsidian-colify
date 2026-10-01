@@ -1,6 +1,9 @@
 export * from "../src/colifyMarkdown";
+export * from "../src/colifyInsertion";
 export * from "../src/colifyBlockOperations";
 export * from "../src/columnWidths";
+export * from "../src/columnHeightEstimate";
+export * from "../src/columnEditorFormatting";
 export * from "../src/markdownRenderSource";
 export * from "../src/markdownProtectedLines";
 export * from "../src/markdownSourceLine";
@@ -8,8 +11,14 @@ export * from "../src/markdownInsertion";
 export * from "../src/markdownBlockTransactions";
 export * from "../src/markdownFence";
 export * from "../src/markdownTable";
+export * from "../src/markdownEditableBlocks";
+export * from "../src/editorParseCache";
 export * from "../src/columnLayout";
+export * from "../src/columnResize";
 export * from "../src/imageControls";
 export * from "../src/dropContent";
 export * from "../src/coreUtils";
 export * from "../src/animationFrameThrottle";
+export * from "../src/readingBlockClaims";
+
+export * from "../src/columnEditorLifecycle";

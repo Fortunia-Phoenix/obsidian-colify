@@ -5,7 +5,7 @@ import {
 	EditorView
 } from "@codemirror/view";
 
-import { classifyMarkdownSourceLine } from "./markdownSourceLine";
+import { classifyMarkdownSourceLines } from "./markdownSourceLine";
 
 export const markdownSourceDecorations = StateField.define<DecorationSet>({
 	create: buildMarkdownSourceDecorations,
@@ -19,10 +19,15 @@ export const markdownSourceDecorations = StateField.define<DecorationSet>({
 
 function buildMarkdownSourceDecorations(state: EditorState): DecorationSet {
 	const decorations = [];
+	const lines = Array.from(
+		{ length: state.doc.lines },
+		(_, index) => state.doc.line(index + 1)
+	);
+	const styles = classifyMarkdownSourceLines(lines.map((line) => line.text));
 
-	for (let lineNumber = 1; lineNumber <= state.doc.lines; lineNumber++) {
-		const line = state.doc.line(lineNumber);
-		const style = classifyMarkdownSourceLine(line.text);
+	for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+		const line = lines[lineIndex];
+		const style = styles[lineIndex];
 
 		if (!style) {
 			continue;

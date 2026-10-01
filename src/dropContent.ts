@@ -64,6 +64,16 @@ export function getDroppedColumnMarkdown(
 	return getDroppedUriMarkdown(dataTransfer) ?? getDroppedTextMarkdown(dataTransfer);
 }
 
+export function getPastedColumnMarkdown(
+	dataTransfer: DataTransfer | null
+): string | null {
+	return (
+		getDroppedUriMarkdown(dataTransfer) ??
+		getPastedHtmlImageMarkdown(dataTransfer) ??
+		getDroppedTextMarkdown(dataTransfer)
+	);
+}
+
 export async function importDroppedFilesAsMarkdown(
 	app: App,
 	sourcePath: string,
@@ -145,6 +155,52 @@ function getDroppedTextMarkdown(
 		dataTransfer.getData("text/plain");
 
 	return text ? createMarkdownForText(text) : null;
+}
+
+function getPastedHtmlImageMarkdown(
+	dataTransfer: DataTransfer | null
+): string | null {
+	if (!dataTransfer || !hasDataType(dataTransfer, "text/html")) {
+		return null;
+	}
+
+	const html = dataTransfer.getData("text/html");
+	if (!html) {
+		return null;
+	}
+
+	const markdown = getHtmlImageSources(html)
+		.map(decodeHtmlAttribute)
+		.map((source) => source.trim())
+		.filter(Boolean)
+		.map((source) =>
+			isUri(source) ? createMarkdownForUri(source) : createMarkdownForTextLine(source)
+		)
+		.filter((line): line is string => line !== null);
+
+	return markdown.length > 0 ? markdown.join("\n") : null;
+}
+
+function getHtmlImageSources(html: string): string[] {
+	const sources: string[] = [];
+	const imageSourcePattern =
+		/<img\b[^>]*\bsrc\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))/gi;
+	let match: RegExpExecArray | null;
+
+	while ((match = imageSourcePattern.exec(html)) !== null) {
+		sources.push(match[1] ?? match[2] ?? match[3] ?? "");
+	}
+
+	return sources;
+}
+
+function decodeHtmlAttribute(value: string): string {
+	return value
+		.replace(/&amp;/g, "&")
+		.replace(/&lt;/g, "<")
+		.replace(/&gt;/g, ">")
+		.replace(/&quot;/g, '"')
+		.replace(/&#39;/g, "'");
 }
 
 function createMarkdownForUri(uri: string): string {

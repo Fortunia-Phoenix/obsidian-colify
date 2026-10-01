@@ -11,6 +11,8 @@ export function applyColumnContainerLayout(element: HTMLElement): void {
 	element.setCssStyles({
 		alignItems: "stretch",
 		display: "flex",
+		flexDirection: "row",
+		flexWrap: "nowrap",
 		maxWidth: "100%",
 		minWidth: "0",
 		overflowX: "auto",
@@ -29,7 +31,12 @@ export function applyColumnWidths(
 }
 
 export function applyColumnWidth(element: HTMLElement, width: number): void {
-	element.setCssStyles({ flex: `${width} 1 0` });
+	element.setCssStyles({
+		flex: `${width} 1 0`,
+		maxWidth: "100%",
+		minWidth: `var(${COLUMN_MIN_WIDTH_PROPERTY})`,
+		width: "0"
+	});
 }
 
 export function getColumnMinimumWidth(element: HTMLElement): number {

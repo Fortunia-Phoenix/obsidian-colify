@@ -12,20 +12,42 @@ import {
 	applyColumnContainerLayout,
 	applyColumnWidths
 } from "./columnLayout";
-import { startColumnResize } from "./columnResize";
+import {
+	configureColumnResizer,
+	startColumnResize
+} from "./columnResize";
 import { normalizeColumnWidths } from "./columnWidths";
 import { parseColifyBlocks } from "./colifyMarkdown";
 import type { ParsedColifyBlock } from "./colifyMarkdown";
 import { countLineBreaks } from "./coreUtils";
 import { replaceColifyBlockWidths } from "./markdownBlockTransactions";
 import { renderColumnPreview } from "./columnPreview";
+import { createReadingBlockClaimRegistry } from "./readingBlockClaims";
+import {
+	captureScrollInteraction,
+	hasScrollInteractionChanged
+} from "./scrollInteraction";
+import type { ScrollInteractionSnapshot } from "./scrollInteraction";
 
 interface ColifyReadingPostProcessorContext {
 	app: App;
+	getTouchResizeLongPressMs: () => number;
 }
 
 interface ParsedReadingColifyBlock extends ParsedColifyBlock {
 	anchorLine: number;
+	anchorText: string;
+}
+
+interface ReadingScrollSnapshot {
+	interaction: ScrollInteractionSnapshot;
+	scrollContainer: HTMLElement;
+	scrollTop: number;
+}
+
+interface ClaimedReadingColifyBlock {
+	block: ParsedReadingColifyBlock;
+	claimKey: string;
 }
 
 type ReadingBlockCache = Map<string, Promise<ParsedReadingColifyBlock[]>>;
@@ -35,12 +57,13 @@ export function createColifyReadingPostProcessor(
 	context: ColifyReadingPostProcessorContext
 ): MarkdownPostProcessor {
 	const blockCache: ReadingBlockCache = new Map();
+	const blockClaims = createReadingBlockClaimRegistry<HTMLElement>();
 
 	return async (
 		el: HTMLElement,
 		processorContext: MarkdownPostProcessorContext
 	) => {
-		if (el.closest("[data-colify-rendered='true']")) {
+		if (isReadingElementHandled(el)) {
 			return;
 		}
 
@@ -60,21 +83,30 @@ export function createColifyReadingPostProcessor(
 
 		const blocks = await getReadingBlocks(context.app, sourceFile, blockCache);
 
-		// Obsidian may run postprocessors before attaching the render fragment.
-		if (el.closest("[data-colify-rendered='true']")) {
+		// The same fragment can be queued more than once while the file read resolves.
+		if (isReadingElementHandled(el)) {
 			return;
 		}
 
 		let intersectsBlock = false;
-		const renderBlocks: ParsedReadingColifyBlock[] = [];
+		const claimedBlocks: ClaimedReadingColifyBlock[] = [];
 		for (const block of blocks) {
 			if (!sectionIntersectsBlock(sectionInfo, block)) {
 				continue;
 			}
 
 			intersectsBlock = true;
-			if (sectionContainsLine(sectionInfo, block.anchorLine)) {
-				renderBlocks.push(block);
+			if (
+				sectionContainsLine(sectionInfo, block.anchorLine) ||
+				sectionContainsAnchorText(sectionInfo, block.anchorText)
+			) {
+				const claimKey = createReadingBlockClaimKey(
+					processorContext,
+					block
+				);
+				if (blockClaims.claim(claimKey, el)) {
+					claimedBlocks.push({ block, claimKey });
+				}
 			}
 		}
 
@@ -82,18 +114,23 @@ export function createColifyReadingPostProcessor(
 			return;
 		}
 
-		if (renderBlocks.length === 0) {
+		if (claimedBlocks.length === 0) {
+			const scrollSnapshot = captureReadingScroll(el);
 			el.empty();
 			el.classList.add("colify-render-fragment-hidden");
 			el.dataset.colifyRendered = "true";
+			el.dataset.colifyReadingProcessed = "true";
+			restoreReadingScroll(scrollSnapshot);
 			return;
 		}
 
 		const child = new ColifyReadingRenderChild(
 			el,
 			context.app,
+			context.getTouchResizeLongPressMs,
 			sourceFile,
-			renderBlocks
+			claimedBlocks,
+			(claimKey) => blockClaims.release(claimKey, el)
 		);
 		processorContext.addChild(child);
 		child.render();
@@ -104,18 +141,27 @@ class ColifyReadingRenderChild extends MarkdownRenderChild {
 	constructor(
 		containerEl: HTMLElement,
 		private readonly app: App,
+		private readonly getTouchResizeLongPressMs: () => number,
 		private readonly sourceFile: TFile,
-		private readonly blocks: ParsedColifyBlock[]
+		private readonly claimedBlocks: ClaimedReadingColifyBlock[],
+		releaseClaim: (claimKey: string) => void
 	) {
 		super(containerEl);
+		this.register(() => {
+			for (const { claimKey } of this.claimedBlocks) {
+				releaseClaim(claimKey);
+			}
+		});
 	}
 
 	render(): void {
+		const scrollSnapshot = captureReadingScroll(this.containerEl);
 		this.containerEl.empty();
 		this.containerEl.classList.remove("colify-render-fragment-hidden");
 		this.containerEl.dataset.colifyRendered = "true";
+		this.containerEl.dataset.colifyReadingProcessed = "true";
 
-		for (const block of this.blocks) {
+		for (const { block } of this.claimedBlocks) {
 			const blockEl = this.containerEl.createDiv({
 				cls: [
 					"colify-widget",
@@ -144,37 +190,55 @@ class ColifyReadingRenderChild extends MarkdownRenderChild {
 				});
 				previewEl.dataset.colifyRendered = "true";
 
-				renderColumnPreview(previewEl, column.content, {
-					app: this.app,
-					component: this,
-					sourcePath: this.sourceFile.path
-				});
+				renderColumnPreview(
+					previewEl,
+					column.content,
+					{
+						app: this.app,
+						component: this,
+						sourcePath: this.sourceFile.path
+					},
+					{
+						onRendered: () => restoreReadingScroll(scrollSnapshot)
+					}
+				);
 
 				if (columnIndex < block.columns.length - 1) {
 					const resizer = columnsEl.createDiv({
 						cls: "colify-resizer colify-reading-resizer"
 					});
-					resizer.setAttribute("role", "separator");
-					resizer.setAttribute("aria-orientation", "vertical");
 					resizer.title = "拖拽调整宽度";
-					resizer.addEventListener("mousedown", (event) => {
+					const commitWidths = (nextWidths: number[]): void => {
+						block.metadata.widths = nextWidths;
+						this.persistWidths(block, nextWidths);
+					};
+					configureColumnResizer({
+						leftColumnIndex: columnIndex,
+						columnElements,
+						columnsContainer: columnsEl,
+						initialWidths: block.metadata.widths,
+						onCommit: commitWidths,
+						resizer
+					});
+					resizer.addEventListener("pointerdown", (event) => {
 						startColumnResize({
+							app: this.app,
 							event,
 							leftColumnIndex: columnIndex,
 							columnElements,
 							columnsContainer: columnsEl,
 							initialWidths: block.metadata.widths,
+							longPressMs: this.getTouchResizeLongPressMs(),
 							resizer,
-							onCommit: (nextWidths) => {
-								block.metadata.widths = nextWidths;
-								this.persistWidths(block, nextWidths);
-							}
+							onCommit: commitWidths
 						});
 					});
 				}
 			});
 			applyColumnWidths(columnElements, widths);
 		}
+
+		restoreReadingScroll(scrollSnapshot);
 	}
 
 	private persistWidths(block: ParsedColifyBlock, widths: number[]): void {
@@ -187,6 +251,66 @@ class ColifyReadingRenderChild extends MarkdownRenderChild {
 				new Notice("Colify：保存分栏宽度失败");
 			});
 	}
+}
+
+function createReadingBlockClaimKey(
+	processorContext: MarkdownPostProcessorContext,
+	block: ParsedReadingColifyBlock
+): string {
+	return [
+		processorContext.docId,
+		processorContext.sourcePath,
+		`${block.from}:${block.to}`,
+		block.raw
+	].join("\0");
+}
+
+function captureReadingScroll(
+	container: HTMLElement
+): ReadingScrollSnapshot | null {
+	const scrollContainer = findReadingScrollContainer(container);
+	return scrollContainer
+		? {
+			interaction: captureScrollInteraction(scrollContainer),
+			scrollContainer,
+			scrollTop: scrollContainer.scrollTop
+		}
+		: null;
+}
+
+function restoreReadingScroll(snapshot: ReadingScrollSnapshot | null): void {
+	if (
+		!snapshot?.scrollContainer.isConnected ||
+		hasScrollInteractionChanged(snapshot.interaction)
+	) {
+		return;
+	}
+
+	if (Math.abs(snapshot.scrollContainer.scrollTop - snapshot.scrollTop) > 0.5) {
+		snapshot.scrollContainer.scrollTop = snapshot.scrollTop;
+	}
+}
+
+function findReadingScrollContainer(
+	container: HTMLElement
+): HTMLElement | null {
+	const readingView = container.closest<HTMLElement>(".markdown-preview-view");
+	if (readingView) {
+		return readingView;
+	}
+
+	for (
+		let element = container.parentElement;
+		element;
+		element = element.parentElement
+	) {
+		const overflowY = getComputedStyle(element).overflowY;
+		if (overflowY === "auto" || overflowY === "scroll") {
+			return element;
+		}
+	}
+
+	return null;
 }
 
 async function getReadingBlocks(
@@ -209,7 +333,7 @@ async function getReadingBlocks(
 	}
 
 	if (cache.size >= MAX_READING_CACHE_ENTRIES) {
-		const oldestKey = cache.keys().next().value as string | undefined;
+		const oldestKey = cache.keys().next().value;
 		if (oldestKey) {
 			cache.delete(oldestKey);
 		}
@@ -218,10 +342,16 @@ async function getReadingBlocks(
 	const nextBlocks = app.vault.cachedRead(file).then((markdown) =>
 		parseColifyBlocks(markdown).blocks.map((block) => ({
 			...block,
-			anchorLine: findBlockAnchorLine(markdown, block)
+			anchorLine: findBlockAnchorLine(markdown, block),
+			anchorText: findBlockAnchorText(block)
 		}))
 	);
 	cache.set(cacheKey, nextBlocks);
+	void nextBlocks.catch(() => {
+		if (cache.get(cacheKey) === nextBlocks) {
+			cache.delete(cacheKey);
+		}
+	});
 
 	return nextBlocks;
 }
@@ -240,6 +370,26 @@ function sectionContainsLine(
 	line: number
 ): boolean {
 	return sectionInfo.lineStart <= line && sectionInfo.lineEnd >= line;
+}
+
+function sectionContainsAnchorText(
+	sectionInfo: MarkdownSectionInformation,
+	anchorText: string
+): boolean {
+	return (
+		anchorText.length > 0 &&
+		sectionInfo.text
+			.split(/\r?\n/)
+			.some((line) => line.trim() === anchorText)
+	);
+}
+
+function isReadingElementHandled(element: HTMLElement): boolean {
+	return (
+		element.dataset.colifyReadingProcessed === "true" ||
+		element.closest('[data-colify-rendered="true"]') !== null ||
+		element.closest(".colify-widget") !== null
+	);
 }
 
 function findBlockAnchorLine(
@@ -262,4 +412,23 @@ function findBlockAnchorLine(
 	}
 
 	return block.startLine;
+}
+
+function findBlockAnchorText(block: ParsedColifyBlock): string {
+	for (const column of block.columns) {
+		const firstVisibleLine = column.content
+			.split("\n")
+			.map((line) => line.trim())
+			.find(
+				(line) =>
+					line.length > 0 &&
+					!line.startsWith("<!-- colify:image ")
+			);
+
+		if (firstVisibleLine) {
+			return firstVisibleLine;
+		}
+	}
+
+	return "";
 }

@@ -5,6 +5,7 @@ import {
 	EXTRA_BLANK_LINE_MARKER_SELECTOR,
 	prepareMarkdownRenderSource
 } from "./markdownRenderSource";
+import { parseMarkdownEditableBlocks } from "./markdownEditableBlocks";
 
 interface MarkdownRenderContext {
 	app: App;
@@ -30,9 +31,54 @@ export async function renderMarkdownPreservingBlankLines(
 		context.sourcePath,
 		context.component
 	);
+	restoreLegacyFontColors(previewSection);
 	normalizeRenderedBlocks(previewSection);
 	restoreExtraBlankLines(previewSection);
 	markHeadingSections(previewSection);
+	annotateEditableMarkdownBlocks(previewSection, content);
+}
+
+function annotateEditableMarkdownBlocks(
+	previewSection: HTMLElement,
+	content: string
+): void {
+	const sourceBlocks = parseMarkdownEditableBlocks(content);
+	const renderedBlocks = Array.from(
+		previewSection.querySelectorAll<HTMLElement>(
+			":scope > .colify-markdown-block"
+		)
+	);
+
+	for (let blockIndex = 0; blockIndex < renderedBlocks.length; blockIndex++) {
+		const renderedBlock = renderedBlocks[blockIndex];
+		const sourceBlock = sourceBlocks[blockIndex];
+		if (!sourceBlock) {
+			delete renderedBlock.dataset.colifyBlockFrom;
+			delete renderedBlock.dataset.colifyBlockTo;
+			delete renderedBlock.dataset.colifyBlockIndex;
+			delete renderedBlock.dataset.colifyBlockKind;
+			delete renderedBlock.dataset.colifyBlockEditable;
+			continue;
+		}
+
+		renderedBlock.dataset.colifyBlockFrom = String(sourceBlock.from);
+		renderedBlock.dataset.colifyBlockTo = String(sourceBlock.to);
+		renderedBlock.dataset.colifyBlockIndex = String(blockIndex);
+		renderedBlock.dataset.colifyBlockKind = sourceBlock.kind;
+		renderedBlock.dataset.colifyBlockEditable = String(sourceBlock.editable);
+	}
+}
+
+function restoreLegacyFontColors(previewSection: HTMLElement): void {
+	const coloredFonts = previewSection.querySelectorAll<HTMLElement>(
+		"font[color]"
+	);
+	for (const font of Array.from(coloredFonts)) {
+		const color = font.getAttribute("color")?.trim();
+		if (color) {
+			font.style.color = color;
+		}
+	}
 }
 
 function normalizeRenderedBlocks(previewSection: HTMLElement): void {
