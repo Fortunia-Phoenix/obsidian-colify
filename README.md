@@ -35,7 +35,7 @@ Colify is designed for notes that need side-by-side structure without leaving Ma
 - Right-click images to set left, center, or right alignment.
 - Render the same layout in Reading view.
 
-For the complete implementation inventory, keyboard shortcuts, persistence behavior, compatibility boundaries, and maintenance notes, see [Colify 功能清单](../Index/功能清单.md).
+For usage details, release files, and development instructions, see the sections below and the GitHub release history.
 
 ## Usage
 
