@@ -1,7 +1,7 @@
 {
 	"id": "colify",
 	"name": "Colify",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"minAppVersion": "1.5.7",
 	"description": "Create and edit visual Markdown column layouts in Live Preview and Reading View.",
 	"author": "Qismet",
