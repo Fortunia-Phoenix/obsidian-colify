@@ -1,6 +1,6 @@
 {
 	"name": "colify",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"description": "Create and edit visual Markdown column layouts in Live Preview and Reading View.",
 	"main": "main.js",
 	"scripts": {
